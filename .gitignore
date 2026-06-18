@@ -1,0 +1,36 @@
+# Foundy / Smart Contract build artifacts
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/node_modules/
+
+# Node / Frontend build artifacts
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# Python / Simulator artifacts
+**/__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDEs & System files
+.vscode/
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

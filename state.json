@@ -1,0 +1,34 @@
+{
+    "pools": {
+        "lending": {
+            "name": "Mock Lending Pool",
+            "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+            "apy": 550,
+            "risk": 1.2
+        },
+        "amm": {
+            "name": "Mock AMM Pool",
+            "address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+            "apy": 1200,
+            "risk": 3.0
+        }
+    },
+    "max_risk_limit": 2.0,
+    "blocks_fast_forwarded": 0,
+    "history": [
+        {
+            "timestamp": 0,
+            "allocations": [
+                5556,
+                4444
+            ],
+            "targets": [
+                "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+                "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+            ],
+            "da_blob_hash": "6c425d12c0d2928c0254031a03c411986e5c4812e785be573949c93e0fa7be91",
+            "signature": "c2ef4dbd92ee206b7a0feda4fa45196629100f1008053196e471352550c8f5670c7e837d01d5f556c782e738ec6d5b899812e25a503d08a599df8c8bcb0edd251b",
+            "message_hash": "f6323eab058ad8fdb00e2738fe788071c352ed13cb1c32a0444938a7bcd69d6c"
+        }
+    ]
+}
