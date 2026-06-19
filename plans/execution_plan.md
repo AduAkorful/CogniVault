@@ -237,3 +237,63 @@ To deploy the smart contract suite (`MockUSDC`, `MockW0G`, `MockLendingPool`, `M
     *   Implement oracle price integration (e.g., Pyth or Chainlink) and slippage thresholds within strategy reallocations to protect user assets from front-running and sandwich attacks when moving actual liquidity across real yield pools.
 *   **Developer Execution Notes:**
     *   Deployed `MockPriceOracle` at `0x86c7EEC7d74fDAA3699DcEdF745e022415a68A6C` to retrieve relative prices and validate slippage tolerance constraints inside `reallocateLiquidity` in `AIGovernedVault.sol`. Added full fuzz testing coverage for slippage boundaries.
+
+---
+
+## 🚀 Production Deployment Architecture
+
+CogniVault uses a split deployment: a static frontend on Vercel and a persistent AI agent backend on Render.
+
+### Architecture Diagram
+
+```
+Vercel (frontend)  ──fetch state.json──>  Render (AI agent)
+     │                                        │
+     │ reads vault data via RPC                │ runs relayer loop (mock mode)
+     │ (no backend needed)                     │ serves /state.json + /health
+     ▼                                        ▼
+0G Galileo RPC                          state.json (pipeline history)
+```
+
+The frontend reads **real on-chain vault data** directly from the 0G Galileo RPC (AUM, allocations, APYs, user balances). The Render backend provides **live pipeline telemetry** (strategy history, DA proofs, storage roots) via `state.json`.
+
+### 1. Vercel — Frontend (Static)
+
+*   **Config:** `vercel.json` at repo root auto-configures build (`cd frontend && npm install && npm run build`, output `frontend/dist`, SPA fallback).
+*   **Environment Variables (Vercel dashboard):**
+    *   `VITE_REOWN_PROJECT_ID` — Reown AppKit project ID for wallet connection (`e2b89dc563814ce818711b10fae02f75`).
+    *   `VITE_PIPELINE_API_URL` — Base URL of the Render AI agent backend (e.g., `https://cognivault-ai-agent.onrender.com`). If unset, frontend falls back to bundled `frontend/public/state.json` (frozen at build time).
+*   **Wallet Connection:** Reown AppKit (WalletConnect) with custom 0G Galileo Testnet network definition (Chain ID 16602). Modal supports MetaMask, WalletConnect QR, Coinbase, and 600+ wallets.
+*   **Deploy:** Push to GitHub → Import on Vercel.
+
+### 2. Render — AI Agent Backend (Docker)
+
+*   **Config:** `render.yaml` Blueprint at repo root. Docker image defined in `ai-agent/Dockerfile` (Node 20 + Python 3 venv, installs all deps, seeds `state.json`).
+*   **Runtime:** Runs `relayer.js` (autonomous pipeline loop) in background + `api_server.js` (HTTP server serving `/state.json` and `/health`) in foreground.
+*   **Default Mode:** Mock simulation (`MOCK_*=true`) — generates pipeline data without gas or 0G providers. Suitable for demo/judging.
+*   **Live Mode:** Set `PRIVATE_KEY`, `VAULT_ADDRESS`, and `MOCK_*=false` env vars in Render dashboard. Fund the agent wallet with A0GI tokens.
+*   **Environment Variables (render.yaml):**
+    *   `MOCK_RELAYER`, `MOCK_COMPUTE`, `MOCK_STORAGE`, `MOCK_DA` — `true` for demo, `false` for live.
+    *   `CORS_ORIGIN` — Set to Vercel frontend URL (e.g., `https://cognivault.vercel.app`) to restrict CORS.
+    *   `RELAYER_INTERVAL_MS` — Rebalance cycle interval (default 60000ms).
+    *   `RELAYER_MAX_CYCLES` — 0 = infinite.
+*   **Keep-Alive (free tier):** Use UptimeRobot (free) to ping `https://your-render-app.onrender.com/health` every 10 minutes to prevent Render free tier sleep.
+*   **Deploy:** `dashboard.render.com` → New → Blueprint → select GitHub repo (auto-reads `render.yaml`).
+
+### 3. Connecting the Two
+
+1.  Deploy AI agent on Render → obtain URL (e.g., `https://cognivault-ai-agent.onrender.com`).
+2.  Set `VITE_PIPELINE_API_URL=https://cognivault-ai-agent.onrender.com` in Vercel env vars.
+3.  Set `CORS_ORIGIN=https://cognivault.vercel.app` in Render env vars.
+4.  Redeploy both.
+
+### Deployment Files
+
+| File | Purpose |
+| :--- | :--- |
+| `vercel.json` | Vercel build config (root: repo, build: frontend, output: dist) |
+| `render.yaml` | Render Blueprint (Docker web service, free plan, env vars) |
+| `ai-agent/Dockerfile` | Docker image (Node 20 + Python 3, installs deps, runs relayer + API) |
+| `ai-agent/api_server.js` | HTTP server serving `state.json` + `/health` with CORS |
+| `frontend/.env.example` | Documents `VITE_REOWN_PROJECT_ID` and `VITE_PIPELINE_API_URL` |
+| `frontend/public/state.json` | Bundled fallback pipeline data (frozen at build time) |

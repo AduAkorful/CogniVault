@@ -1,908 +1,609 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ethers } from 'ethers';
-import { 
-  TrendingUp, Shield, Database, Cpu, Play, RefreshCw, 
-  ChevronRight, Info, CheckCircle2, ArrowRightLeft, 
-  Wallet, Lock, Coins, FileText, ChevronDown, Settings 
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts';
+import {
+  Wallet, Lock, TrendingUp, Database, Cpu, Shield, ArrowRightLeft,
+  RefreshCw, Coins, Activity, Zap, CheckCircle2,
+  Sparkles, ArrowDownRight, Settings
 } from 'lucide-react';
-import { VAULT_ABI, ERC20_ABI, POOL_ABI, DEFAULT_ADDRESSES } from './config/contracts';
+import {
+  useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect
+} from '@reown/appkit/react';
+import {
+  POOL_ABI, DEFAULT_ADDRESSES,
+  GALILEO_CHAIN_ID, GALILEO_RPC
+} from './config/contracts';
 import { useVault } from './hooks/useVault';
 
-const BLOCKS_PER_YEAR = 10512000; // 3 seconds per block
-const LENDING_RISK = 1.2;
-const AMM_RISK = 3.0;
+const STATE_JSON_URL = import.meta.env.VITE_PIPELINE_API_URL
+  ? `${import.meta.env.VITE_PIPELINE_API_URL}/state.json`
+  : '/state.json';
+const SYNC_INTERVAL = 15000;
+
+const POOL_META = {
+  [DEFAULT_ADDRESSES.lendingPool.toLowerCase()]: { name: 'Lending Pool', risk: 1.2, color: '#00f2fe' },
+  [DEFAULT_ADDRESSES.ammPool.toLowerCase()]: { name: 'AMM Pool', risk: 3.0, color: '#a855f7' }
+};
 
 function App() {
-  // Chain Connection & Sandbox State
-  const [walletConnected, setWalletConnected] = useState(false);
-  const [walletAddress, setWalletAddress] = useState('');
-  const [sandboxMode, setSandboxMode] = useState(true);
+  // Reown AppKit hooks
+  const { open } = useAppKit();
+  const { address, isConnected } = useAppKitAccount();
+  const { walletProvider } = useAppKitProvider('eip155');
+  const { disconnect } = useDisconnect();
 
-  // Galileo Testnet config states (persisted in localStorage)
-  const [vaultAddress, setVaultAddress] = useState(localStorage.getItem('vault_address') || '');
-  const [usdcAddress, setUsdcAddress] = useState(localStorage.getItem('usdc_address') || '');
-  const [lendingPoolAddress, setLendingPoolAddress] = useState(localStorage.getItem('lending_pool_address') || '');
-  const [ammPoolAddress, setAmmPoolAddress] = useState(localStorage.getItem('amm_pool_address') || '');
-  const [priceOracleAddress, setPriceOracleAddress] = useState(localStorage.getItem('price_oracle_address') || '');
-  const [showSettings, setShowSettings] = useState(false);
-  const [signer, setSigner] = useState(null);
+  // Protocol state (read-only, always visible)
+  const [readOnlyProvider] = useState(
+    () => new ethers.JsonRpcProvider(GALILEO_RPC, {
+      name: '0G-Galileo-Testnet',
+      chainId: GALILEO_CHAIN_ID
+    })
+  );
+  const [blockNumber, setBlockNumber] = useState(0);
+  const [vaultConfig, setVaultConfig] = useState(null);
+  const [vaultMetrics, setVaultMetrics] = useState(null);
+  const [poolDetails, setPoolDetails] = useState([]);
+  const [netAPY, setNetAPY] = useState(0);
+  const [sharePrice, setSharePrice] = useState(1);
 
-  useEffect(() => {
-    if (walletConnected && window.ethereum) {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      provider.getSigner().then(setSigner).catch(console.error);
-    } else {
-      setSigner(null);
-    }
-  }, [walletConnected]);
+  // User state (only when connected)
+  const [userPosition, setUserPosition] = useState(null);
+  const [isOwner, setIsOwner] = useState(false);
 
-  const { deposit: vaultDeposit, redeem: vaultRedeem } = useVault(vaultAddress, usdcAddress, signer);
+  // Pipeline
+  const [pipelineState, setPipelineState] = useState(null);
+  const [chartData, setChartData] = useState([]);
 
-  // Simulation State Variables
-  const [blockNumber, setBlockNumber] = useState(12800540);
-  const [userUSDC, setUserUSDC] = useState(25000); // User starts with 25k USDC
-  const [userShares, setUserShares] = useState(0); // Shares minted for the user
-  const [totalShares, setTotalShares] = useState(100000); // Total outstanding shares
-  
-  // Vault Assets under management (Principals)
-  const [vaultLendingPrincipal, setVaultLendingPrincipal] = useState(60000); 
-  const [vaultAmmPrincipal, setVaultAmmPrincipal] = useState(40000);
-  const [vaultIdleUSDC, setVaultIdleUSDC] = useState(0);
+  // Actions
+  const [depositAmount, setDepositAmount] = useState('');
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [txPending, setTxPending] = useState(false);
 
-  // Last action blocks (to track yield block by block)
-  const [lendingLastBlock, setLendingLastBlock] = useState(12800540);
-  const [ammLastBlock, setAmmLastBlock] = useState(12800540);
+  // Market sim
+  const [lendingApyInput, setLendingApyInput] = useState(550);
+  const [ammApyInput, setAmmApyInput] = useState(1200);
+  const [marketShiftPending, setMarketShiftPending] = useState(false);
+  const [rebalancePending, setRebalancePending] = useState(false);
+  const [lastRebalanceTx, setLastRebalanceTx] = useState('');
+  const [showMarketPanel, setShowMarketPanel] = useState(false);
 
-  // APYs
-  const [lendingAPY, setLendingAPY] = useState(550); // 5.50% (basis points)
-  const [ammAPY, setAMMAPY] = useState(1200); // 12.00% (basis points)
-  const [riskLimit, setRiskLimit] = useState(2.0);
+  // Logs
+  const [logs, setLogs] = useState([]);
+  const logIdRef = useRef(0);
+  const syncingRef = useRef(false);
+  const configFetchedRef = useRef(false);
 
-  // Active allocations (start at 60/40)
-  const [lendingAllocBps, setLendingAllocBps] = useState(6000);
-  const [ammAllocBps, setAmmAllocBps] = useState(4000);
+  const { deposit, redeem, executeAIStrategy, setPoolAPY,
+    getVaultConfig, getVaultMetrics, getUserPosition } = useVault(
+    DEFAULT_ADDRESSES.vault, DEFAULT_ADDRESSES.usdc, walletProvider, readOnlyProvider
+  );
 
-  // Deposit/Withdrawal Input States
-  const [depositAmount, setDepositAmount] = useState('5000');
-  const [withdrawShares, setWithdrawShares] = useState('10000');
+  const addLog = useCallback((type, text) => {
+    const id = ++logIdRef.current;
+    setLogs(prev => [...prev.slice(-80), { id, type, text, time: new Date().toLocaleTimeString() }]);
+  }, []);
 
-  // Pipeline execution animation state
-  const [activeStep, setActiveStep] = useState(0); // 0 = idle, 1 = Storage, 2 = Compute, 3 = DA, 4 = EVM
-  const [rebalancing, setRebalancing] = useState(false);
-  const [storageRoot, setStorageRoot] = useState('0xe1b0defd92d2277d7a8239f648207fca3e731205a925f3dc740449280b9255f3');
-
-  // Terminal Logs Feed
-  const [logs, setLogs] = useState([
-    { type: 'system', text: 'CogniVault AI Agent Daemon Initialized.' },
-    { type: 'info', text: `TEE public key registered: 0x822B9030e8051cC296c5B76ad8B1Bcb9dbF8eB62` },
-    { type: 'info', text: 'Currently listening for market APY movements.' }
-  ]);
-
-  // Performance history log (NAV over time)
-  const [history, setHistory] = useState([
-    { label: 'Run 1', vault: 100, baseline: 100 },
-    { label: 'Run 2', vault: 104, baseline: 102 },
-    { label: 'Run 3', vault: 109, baseline: 104 },
-    { label: 'Run 4', vault: 115, baseline: 107 },
-    { label: 'Run 5', vault: 122, baseline: 109 }
-  ]);
-
-  // Connect wallet helper
-  const connectWallet = async () => {
-    if (walletConnected) {
-      setWalletConnected(false);
-      setWalletAddress('');
-      setSandboxMode(true);
-      addLog('system', 'Wallet disconnected. Switched to sandbox simulator.');
-    } else {
-      if (!window.ethereum) {
-        alert('MetaMask or another Web3 wallet provider was not detected.');
-        return;
-      }
-      try {
-        addLog('system', 'Requesting wallet connection...');
-        const provider = new ethers.BrowserProvider(window.ethereum);
-        const accounts = await provider.send("eth_requestAccounts", []);
-        if (accounts.length > 0) {
-          setWalletConnected(true);
-          setWalletAddress(accounts[0]);
-          setSandboxMode(false);
-          addLog('system', `Wallet connected: ${accounts[0]}. Switched to Galileo Testnet mode.`);
-        }
-      } catch (err) {
-        console.error(err);
-        addLog('error', `Wallet connection failed: ${err.message}`);
-      }
-    }
-  };
-
-  // On-chain state sync
-  const syncOnChainState = async () => {
-    if (!window.ethereum || !walletConnected || sandboxMode) return;
+  // Protocol sync (always runs — read-only)
+  const syncProtocol = useCallback(async () => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
     try {
-      if (!vaultAddress || !usdcAddress || !lendingPoolAddress || !ammPoolAddress) {
-        return;
-      }
-
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const userAddr = walletAddress;
-
-      const vaultContract = new ethers.Contract(vaultAddress, VAULT_ABI, provider);
-      const usdcContract = new ethers.Contract(usdcAddress, ERC20_ABI, provider);
-      const lendingContract = new ethers.Contract(lendingPoolAddress, POOL_ABI, provider);
-      const ammContract = new ethers.Contract(ammPoolAddress, POOL_ABI, provider);
-
-      // Fetch block number
-      const blockNum = await provider.getBlockNumber();
+      const blockNum = await readOnlyProvider.getBlockNumber();
       setBlockNumber(blockNum);
 
-      // Fetch user balances
-      const usdcBal = await usdcContract.balanceOf(userAddr);
-      const userSharesBal = await vaultContract.balanceOf(userAddr);
-      
-      const totalSharesBalRaw = await provider.call({
-        to: vaultAddress,
-        data: ethers.id("totalSupply()").substring(0, 10)
-      });
-      const totalSharesUint = totalSharesBalRaw !== "0x" ? ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], totalSharesBalRaw)[0] : 0n;
-
-      setUserUSDC(Number(ethers.formatUnits(usdcBal, 6)));
-      setUserShares(Number(ethers.formatUnits(userSharesBal, 18)));
-      setTotalShares(Number(ethers.formatUnits(totalSharesUint, 18)));
-
-      // Vault balances inside pools
-      const lendingPoolBal = await lendingContract.balanceOf(vaultAddress);
-      const ammPoolBal = await ammContract.balanceOf(vaultAddress);
-      const idleBal = await usdcContract.balanceOf(vaultAddress);
-
-      const formattedLending = Number(ethers.formatUnits(lendingPoolBal, 6));
-      const formattedAmm = Number(ethers.formatUnits(ammPoolBal, 6));
-      const formattedIdle = Number(ethers.formatUnits(idleBal, 6));
-
-      setVaultLendingPrincipal(formattedLending);
-      setVaultAmmPrincipal(formattedAmm);
-      setVaultIdleUSDC(formattedIdle);
-
-      // Fetch APYs
-      const lendingApyVal = await lendingContract.getAPY();
-      const ammApyVal = await ammContract.getAPY();
-      setLendingAPY(Number(lendingApyVal));
-      setAMMAPY(Number(ammApyVal));
-
-      // Calculate allocations
-      const totalPrincipal = formattedLending + formattedAmm + formattedIdle;
-      if (totalPrincipal > 0) {
-        setLendingAllocBps(Math.round((formattedLending * 10000) / totalPrincipal));
-        setAmmAllocBps(Math.round((formattedAmm * 10000) / totalPrincipal));
+      const metrics = await getVaultMetrics();
+      if (metrics) {
+        setVaultMetrics(metrics);
+        const sp = metrics.totalSupply > 0 ? metrics.totalAssets / metrics.totalSupply : 1;
+        setSharePrice(sp);
       }
 
-      setLendingLastBlock(blockNum);
-      setAmmLastBlock(blockNum);
+      if (!configFetchedRef.current) {
+        const config = await getVaultConfig();
+        if (config) {
+          setVaultConfig(config);
+          if (address && config.owner) {
+            setIsOwner(config.owner.toLowerCase() === address.toLowerCase());
+          }
+          configFetchedRef.current = true;
+        }
+      }
 
+      // Pools
+      const pools = [];
+      let weightedApy = 0;
+      const totalDeployed = metrics ? metrics.totalAssets - metrics.idleBalance : 0;
+
+      for (const addr of [DEFAULT_ADDRESSES.lendingPool, DEFAULT_ADDRESSES.ammPool]) {
+        try {
+          const poolContract = new ethers.Contract(addr, POOL_ABI, readOnlyProvider);
+          const [bal, apy, pendingYield] = await Promise.all([
+            poolContract.balanceOf(DEFAULT_ADDRESSES.vault),
+            poolContract.getAPY(),
+            poolContract.getPendingYield(DEFAULT_ADDRESSES.vault)
+          ]);
+          const balance = Number(ethers.formatUnits(bal, 6));
+          const apyNum = Number(apy);
+          const pending = Number(ethers.formatUnits(pendingYield, 6));
+          if (totalDeployed > 0) weightedApy += (balance / totalDeployed) * apyNum;
+          const meta = POOL_META[addr.toLowerCase()];
+          pools.push({
+            address: addr, name: meta?.name || 'Pool', risk: meta?.risk || 0,
+            color: meta?.color || '#64748b', balance, apy: apyNum, pendingYield: pending
+          });
+        } catch {
+          // skip
+        }
+      }
+      setPoolDetails(pools);
+      setNetAPY(weightedApy / 100);
+
+      // User position (only when connected)
+      if (address) {
+        const pos = await getUserPosition(address);
+        if (pos) setUserPosition(pos);
+      }
     } catch (err) {
-      console.error("On-chain sync error:", err);
+      if (err.code !== -32005 && err.code !== 'UNKNOWN_ERROR') {
+        console.error('Sync error:', err);
+      }
+    } finally {
+      syncingRef.current = false;
     }
-  };
+  }, [readOnlyProvider, address, getVaultConfig, getVaultMetrics, getUserPosition]);
 
-  // Wallet listeners
+  // Poll protocol data
   useEffect(() => {
-    if (window.ethereum) {
-      const handleAccountsChanged = (accounts) => {
-        if (accounts.length > 0) {
-          setWalletAddress(accounts[0]);
-          addLog('system', `Wallet account changed: ${accounts[0]}`);
-        } else {
-          setWalletConnected(false);
-          setWalletAddress('');
-          setSandboxMode(true);
-          addLog('system', 'Wallet disconnected.');
-        }
-      };
-      
-      const handleChainChanged = () => {
-        window.location.reload();
-      };
+    Promise.resolve().then(() => syncProtocol());
+    const interval = setInterval(syncProtocol, SYNC_INTERVAL);
+    return () => clearInterval(interval);
+  }, [syncProtocol]);
 
-      window.ethereum.on('accountsChanged', handleAccountsChanged);
-      window.ethereum.on('chainChanged', handleChainChanged);
+  // When wallet connects, reset config cache and re-sync
+  useEffect(() => {
+    if (isConnected && address) {
+      configFetchedRef.current = false;
+      addLog('system', `Wallet connected: ${address.slice(0, 8)}...${address.slice(-4)}`);
+      Promise.resolve().then(() => syncProtocol());
+    }
+    if (!isConnected) {
+      Promise.resolve().then(() => {
+        setUserPosition(null);
+        setIsOwner(false);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, address]);
 
-      return () => {
-        if (window.ethereum.removeListener) {
-          window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
-          window.ethereum.removeListener('chainChanged', handleChainChanged);
+  // Pipeline fetch
+  const fetchPipelineState = useCallback(async () => {
+    try {
+      const res = await fetch(STATE_JSON_URL);
+      if (!res.ok) return;
+      const data = await res.json();
+      setPipelineState(data);
+      if (data.history?.length > 0) {
+        setChartData(data.history.map((h, i) => ({
+          run: i + 1, label: `#${i + 1}`,
+          lending: parseFloat(h.allocations[0] ? (h.allocations[0] / 100).toFixed(2) : 0),
+          amm: parseFloat(h.allocations[1] ? (h.allocations[1] / 100).toFixed(2) : 0),
+        })));
+        if (data.pools) {
+          setLendingApyInput(data.pools.lending?.apy || 550);
+          setAmmApyInput(data.pools.amm?.apy || 1200);
         }
-      };
+      }
+    } catch {
+      // silent
     }
   }, []);
 
-  // Poll state on Galileo Testnet
   useEffect(() => {
-    if (sandboxMode || !walletConnected) return;
-    syncOnChainState();
-    const interval = setInterval(syncOnChainState, 8000);
+    Promise.resolve().then(() => fetchPipelineState());
+    const interval = setInterval(fetchPipelineState, 30000);
     return () => clearInterval(interval);
-  }, [sandboxMode, walletConnected, vaultAddress, usdcAddress, lendingPoolAddress, ammPoolAddress]);
+  }, [fetchPipelineState]);
 
-  // Live Deposit transaction logic
-  const handleLiveDeposit = async (amount) => {
-    await vaultDeposit(amount, walletAddress, addLog, syncOnChainState);
-  };
-
-  // Live Withdraw transaction logic
-  const handleLiveWithdraw = async (shares) => {
-    await vaultRedeem(shares, walletAddress, addLog, syncOnChainState);
-  };
-
-  // Log helper
-  const addLog = (type, text) => {
-    setLogs(prev => [...prev, { type, text }]);
-    // Scroll terminal to bottom after render
-    setTimeout(() => {
-      const el = document.getElementById('terminal-feed');
-      if (el) el.scrollTop = el.scrollHeight;
-    }, 50);
-  };
-
-  // Yield calculations block by block
-  const getPendingLendingYield = () => {
-    const delta = blockNumber - lendingLastBlock;
-    if (delta <= 0) return 0;
-    return (vaultLendingPrincipal * lendingAPY * delta) / (BLOCKS_PER_YEAR * 10000);
-  };
-
-  const getPendingAmmYield = () => {
-    const delta = blockNumber - ammLastBlock;
-    if (delta <= 0) return 0;
-    return (vaultAmmPrincipal * ammAPY * delta) / (BLOCKS_PER_YEAR * 10000);
-  };
-
-  const pendingLendingYield = getPendingLendingYield();
-  const pendingAmmYield = getPendingAmmYield();
-  
-  // Total AUM of the vault
-  const totalLendingAssets = vaultLendingPrincipal + pendingLendingYield;
-  const totalAmmAssets = vaultAmmPrincipal + pendingAmmYield;
-  const totalVaultAssets = totalLendingAssets + totalAmmAssets + vaultIdleUSDC;
-
-  // Share NAV
-  const sharePrice = totalShares > 0 ? (totalVaultAssets / totalShares) : 1.0;
-
-  // Fast forward blocks simulator
-  const fastForwardBlocks = (count) => {
-    setBlockNumber(prev => prev + count);
-    addLog('system', `Simulating block fast-forward: +${count} blocks added.`);
-    addLog('info', `Yield accrued block-by-block. Total assets expanded.`);
-  };
-
-  // Optimize & rebalance strategy simulation
-  const handleRebalance = () => {
-    if (rebalancing) return;
-    setRebalancing(true);
-    addLog('system', 'Rebalance triggered. Initializing 0G pipeline verification...');
-    
-    // Step 1: Storage
-    setActiveStep(1);
-    addLog('info', '[0G Storage] Querying historical yield and pool risk vectors...');
-    
-    setTimeout(() => {
-      addLog('info', `[0G Storage] Merkle Root Detected: ${storageRoot}`);
-      addLog('info', '[0G Storage] Downloading file & verifying Merkle path inclusion proof...');
-      addLog('info', '[0G Storage] Proof verification complete. Ingested historical yield records.');
-      
-      // Step 2: Compute
-      setActiveStep(2);
-      addLog('info', '[0G Compute] Resolving optimization model in secure TEE...');
-      
-      // Calculate allocations based on APY and risk limits
-      let targetLendingAlloc = 0;
-      let targetAmmAlloc = 0;
-
-      if (ammAPY > lendingAPY) {
-        // Allocate max to AMM subject to risk
-        let rawAmm = (riskLimit - LENDING_RISK) / (AMM_RISK - LENDING_RISK);
-        rawAmm = Math.max(0, Math.min(1, rawAmm));
-        targetAmmAlloc = Math.round(rawAmm * 10000);
-        targetLendingAlloc = 10000 - targetAmmAlloc;
-      } else {
-        // Allocate max to Lending subject to risk
-        let rawLending = (riskLimit - AMM_RISK) / (LENDING_RISK - AMM_RISK);
-        rawLending = Math.max(0, Math.min(1, rawLending));
-        targetLendingAlloc = Math.round(rawLending * 10000);
-        targetAmmAlloc = 10000 - targetLendingAlloc;
-      }
-
-      setTimeout(() => {
-        addLog('info', `[0G Compute] Optimization resolved allocations: Lending: ${targetLendingAlloc/100}%, AMM: ${targetAmmAlloc/100}%`);
-        addLog('info', '[0G Compute] Cryptographically signing rebalance payload inside TEE...');
-        
-        // Step 3: DA
-        setActiveStep(3);
-        addLog('info', '[0G DA] Dispersing strategy payload and Merkle proof to 0G DA...');
-        
-        setTimeout(() => {
-          const mockBlobHash = '0x' + Math.random().toString(16).substring(2, 18) + '...da';
-          addLog('info', `[0G DA] Dispersed successfully. Blob Hash: ${mockBlobHash}`);
-          
-          // Step 4: EVM execution
-          setActiveStep(4);
-          addLog('info', '[0G Chain] Calling executeAIStrategy() on AIGovernedVault...');
-          
-          setTimeout(() => {
-            // Commit the yield to the principals & apply new allocations
-            const currentTotal = totalVaultAssets;
-            const newLending = (currentTotal * targetLendingAlloc) / 10000;
-            const newAmm = (currentTotal * targetAmmAlloc) / 10000;
-
-            setVaultLendingPrincipal(newLending);
-            setVaultAmmPrincipal(newAmm);
-            setVaultIdleUSDC(0);
-            
-            // Reset block counters
-            setLendingLastBlock(blockNumber);
-            setAmmLastBlock(blockNumber);
-
-            setLendingAllocBps(targetLendingAlloc);
-            setAmmAllocBps(targetAmmAlloc);
-
-            // Add to NAV performance history
-            setHistory(prev => {
-              const runNum = prev.length + 1;
-              const lastVal = prev[prev.length - 1];
-              // Simulated gain based on allocation efficiency vs holding 100% lending (baseline)
-              const vaultNav = Math.round(lastVal.vault * (1 + (targetLendingAlloc * lendingAPY + targetAmmAlloc * ammAPY) / (10000 * 1000)));
-              const baseNav = Math.round(lastVal.baseline * (1 + lendingAPY / 10000 / 100));
-              return [...prev, { label: `Run ${runNum}`, vault: vaultNav, baseline: baseNav }];
-            });
-
-            addLog('system', 'Rebalance transaction executed and confirmed on-chain!');
-            addLog('info', `✔ Vault positions successfully rotated.`);
-            
-            // Generate next storage root to simulate log aggregator upload
-            const nextRoot = '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
-            setStorageRoot(nextRoot);
-            addLog('system', `[0G Storage] Aggregated logs uploaded. New Merkle root: ${nextRoot}`);
-            
-            setActiveStep(0);
-            setRebalancing(false);
-          }, 1500);
-        }, 1500);
-      }, 1500);
-    }, 1500);
-  };
-
-  // Deposit Action
-  const handleDeposit = (e) => {
-    e.preventDefault();
+  // Actions
+  const handleDeposit = async () => {
     const amount = parseFloat(depositAmount);
     if (isNaN(amount) || amount <= 0) return;
-
-    if (!sandboxMode) {
-      handleLiveDeposit(depositAmount);
-      return;
-    }
-
-    if (amount > userUSDC) {
-      alert("Insufficient USDC balance");
-      return;
-    }
-
-    // Yield accrued first
-    setVaultLendingPrincipal(prev => prev + pendingLendingYield);
-    setVaultAmmPrincipal(prev => prev + pendingAmmYield);
-    setLendingLastBlock(blockNumber);
-    setAmmLastBlock(blockNumber);
-
-    // Calculate share minting
-    const sharesToMint = totalShares > 0 ? (amount / sharePrice) : amount;
-    
-    // Perform transfer
-    setUserUSDC(prev => prev - amount);
-    setUserShares(prev => prev + sharesToMint);
-    setTotalShares(prev => prev + sharesToMint);
-
-    // Immediately deploy deposited funds according to current allocations
-    const depLending = (amount * lendingAllocBps) / 10000;
-    const depAmm = amount - depLending;
-    setVaultLendingPrincipal(prev => prev + depLending);
-    setVaultAmmPrincipal(prev => prev + depAmm);
-
-    addLog('system', `Deposited ${amount.toLocaleString()} USDC to vault. Minted ${sharesToMint.toLocaleString(undefined, {maximumFractionDigits: 2})} shares.`);
+    setTxPending(true);
+    try {
+      await deposit(amount, address, addLog, syncProtocol);
+      setDepositAmount('');
+    } catch { /* logged */ } finally { setTxPending(false); }
   };
 
-  // Withdraw Action
-  const handleWithdraw = (e) => {
-    e.preventDefault();
-    const shares = parseFloat(withdrawShares);
-    if (isNaN(shares) || shares <= 0) return;
-
-    if (!sandboxMode) {
-      handleLiveWithdraw(withdrawShares);
-      return;
-    }
-
-    if (shares > userShares) {
-      alert("Insufficient share balance");
-      return;
-    }
-
-    // Yield accrued first
-    const updatedLending = vaultLendingPrincipal + pendingLendingYield;
-    const updatedAmm = vaultAmmPrincipal + pendingAmmYield;
-    const updatedTotal = updatedLending + updatedAmm + vaultIdleUSDC;
-    
-    const usdcToReceive = shares * sharePrice;
-
-    // Perform withdrawal proportionally
-    const decLending = (usdcToReceive * (updatedLending / updatedTotal));
-    const decAmm = usdcToReceive - decLending;
-
-    setVaultLendingPrincipal(updatedLending - decLending);
-    setVaultAmmPrincipal(updatedAmm - decAmm);
-    setLendingLastBlock(blockNumber);
-    setAmmLastBlock(blockNumber);
-
-    setUserShares(prev => prev - shares);
-    setTotalShares(prev => prev - shares);
-    setUserUSDC(prev => prev + usdcToReceive);
-
-    addLog('system', `Withdrew ${usdcToReceive.toLocaleString(undefined, {maximumFractionDigits: 2})} USDC from vault. Burned ${shares.toLocaleString()} shares.`);
+  const handleWithdraw = async () => {
+    const amount = parseFloat(withdrawAmount);
+    if (isNaN(amount) || amount <= 0) return;
+    setTxPending(true);
+    try {
+      await redeem(amount, address, addLog, syncProtocol);
+      setWithdrawAmount('');
+    } catch { /* logged */ } finally { setTxPending(false); }
   };
 
-  // Donut chart stroke-dasharray calculation helpers
-  const lendingPct = lendingAllocBps / 100;
-  const ammPct = ammAllocBps / 100;
-  const dashLending = `${lendingPct} ${100 - lendingPct}`;
-  const dashAmm = `${ammPct} ${100 - ammPct}`;
+  const handleMarketShift = async () => {
+    if (!isOwner) return;
+    setMarketShiftPending(true);
+    try {
+      addLog('system', 'Simulating market movement...');
+      await setPoolAPY(DEFAULT_ADDRESSES.lendingPool, lendingApyInput, addLog);
+      await setPoolAPY(DEFAULT_ADDRESSES.ammPool, ammApyInput, addLog);
+      addLog('system', 'Market updated. AI agent will detect and rebalance.');
+      syncProtocol();
+    } catch { /* logged */ } finally { setMarketShiftPending(false); }
+  };
+
+  const handleTriggerRebalance = async () => {
+    if (!pipelineState?.history?.length) {
+      addLog('error', 'No signed strategy available.');
+      return;
+    }
+    setRebalancePending(true);
+    try {
+      const latest = pipelineState.history[pipelineState.history.length - 1];
+      const blobHash = `0x${latest.da_blob_hash}`;
+      const dataRoot = latest.da_data_root ? `0x${latest.da_data_root}` : ethers.ZeroHash;
+      addLog('system', 'Triggering rebalance from latest AI strategy...');
+      const tx = await executeAIStrategy(
+        latest.allocations, latest.targets,
+        `0x${latest.signature}`, blobHash, dataRoot, addLog, syncProtocol
+      );
+      if (tx) { setLastRebalanceTx(tx.hash); addLog('system', 'Rebalance confirmed.'); }
+    } catch { /* logged */ } finally { setRebalancePending(false); }
+  };
+
+  // Helpers
+  const fmt = (n, d = 2) => (n != null && !isNaN(n)) ? n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : '0.00';
+  const fmtAddr = (addr) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : 'N/A';
+
+  const vaultAUM = vaultMetrics?.totalAssets ?? 0;
+  const idleBal = vaultMetrics?.idleBalance ?? 0;
+  const totalPoolBal = poolDetails.reduce((s, p) => s + p.balance, 0) + idleBal;
+  const allocationData = totalPoolBal > 0
+    ? poolDetails.filter(p => p.balance > 0).map(p => ({
+        name: p.name, pct: (p.balance / totalPoolBal) * 100, color: p.color, balance: p.balance
+      })).concat(idleBal > 0 ? [{ name: 'Idle', pct: (idleBal / totalPoolBal) * 100, color: '#475569', balance: idleBal }] : [])
+    : [];
+
+  const latestRun = pipelineState?.history?.[pipelineState.history.length - 1];
+  const pipelineSteps = [
+    { label: '0G Storage', icon: Database, active: !!pipelineState?.latest_storage_root, detail: pipelineState?.latest_storage_root ? fmtAddr(pipelineState.latest_storage_root) : 'Waiting' },
+    { label: '0G Compute', icon: Cpu, active: !!pipelineState?.history?.length, detail: pipelineState?.history?.length ? `${pipelineState.history.length} runs` : 'Idle' },
+    { label: '0G DA', icon: Shield, active: !!pipelineState?.da_blob_hash, detail: pipelineState?.da_blob_hash ? fmtAddr(pipelineState.da_blob_hash) : 'Idle' },
+    { label: '0G Chain', icon: ArrowRightLeft, active: !!lastRebalanceTx, detail: lastRebalanceTx ? fmtAddr(lastRebalanceTx) : 'Idle' }
+  ];
 
   return (
-    <div className="dashboard-container">
+    <div className="app">
       {/* Header */}
-      <header className="dashboard-header">
-        <div className="header-logo">
-          <div className="logo-icon">
-            <Lock className="text-dark-900" size={24} style={{ color: '#080b11' }} />
+      <header className="app-header">
+        <div className="app-header-left">
+          <div className="header-logo-sm">
+            <Lock size={18} style={{ color: '#080b11' }} />
           </div>
-          <div className="logo-text">
-            <h1>CogniVault</h1>
-            <p>0G AI-GOVERNED OPTIMIZER</p>
-          </div>
+          <span className="header-name">CogniVault</span>
+          <span className="header-net"><span className="net-dot" /> Galileo Live</span>
         </div>
-        <div className="header-controls">
-          <div className={`badge-status ${sandboxMode ? 'sandbox' : ''}`}>
-            <span className="pulse-dot"></span>
-            {sandboxMode ? 'Sandbox Simulator' : 'Galileo Testnet'}
-          </div>
-          <button className="badge-wallet" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} onClick={() => setShowSettings(!showSettings)}>
-            <Settings size={16} />
-            <span>Config</span>
+        <div className="app-header-right">
+          <button className="header-btn" onClick={() => setShowMarketPanel(!showMarketPanel)}>
+            <Settings size={15} /> Market Sim
           </button>
-          <button className="badge-wallet" onClick={connectWallet}>
-            <Wallet size={16} />
-            <span>{walletConnected ? `${walletAddress.substring(0, 6)}...${walletAddress.substring(walletAddress.length - 4)}` : 'Connect Wallet'}</span>
-          </button>
+          {isConnected ? (
+            <button className="header-wallet" onClick={() => disconnect()}>
+              <Wallet size={15} /> {fmtAddr(address)}
+            </button>
+          ) : (
+            <button className="header-wallet connect" onClick={() => open()}>
+              <Wallet size={15} /> Connect Wallet
+            </button>
+          )}
         </div>
       </header>
 
-      {showSettings && (
-        <div className="glass-card" style={{ padding: '1.5rem', border: '1px solid var(--color-primary)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Settings size={18} /> Galileo Testnet Configuration</h3>
-            <button className="badge-status sandbox" style={{ cursor: 'pointer', border: 'none', background: 'rgba(0, 242, 254, 0.15)', color: 'var(--color-primary)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem' }} onClick={() => {
-              setVaultAddress(DEFAULT_ADDRESSES.vault); 
-              setUsdcAddress(DEFAULT_ADDRESSES.usdc);
-              setLendingPoolAddress(DEFAULT_ADDRESSES.lendingPool);
-              setAmmPoolAddress(DEFAULT_ADDRESSES.ammPool);
-              setPriceOracleAddress(DEFAULT_ADDRESSES.priceOracle);
-              
-              localStorage.setItem('vault_address', DEFAULT_ADDRESSES.vault);
-              localStorage.setItem('usdc_address', DEFAULT_ADDRESSES.usdc);
-              localStorage.setItem('lending_pool_address', DEFAULT_ADDRESSES.lendingPool);
-              localStorage.setItem('amm_pool_address', DEFAULT_ADDRESSES.ammPool);
-              localStorage.setItem('price_oracle_address', DEFAULT_ADDRESSES.priceOracle);
-              addLog('system', 'Pre-populated Galileo testnet addresses.');
-            }}>
-              Prepopulate Example
-            </button>
+      <div className="app-body">
+        {/* Protocol Metrics — always visible */}
+        <section className="metrics-row">
+          <div className="metric-item">
+            <span className="metric-label">Vault AUM</span>
+            <span className="metric-value cyan">${fmt(vaultAUM, 0)}</span>
           </div>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>AIGovernedVault Address</label>
-              <input 
-                type="text" 
-                value={vaultAddress} 
-                onChange={(e) => { setVaultAddress(e.target.value); localStorage.setItem('vault_address', e.target.value); }} 
-                placeholder="0x..." 
-                style={{ background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.5rem', color: '#fff', fontSize: '0.85rem' }}
-              />
-            </div>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>MockUSDC Address</label>
-              <input 
-                type="text" 
-                value={usdcAddress} 
-                onChange={(e) => { setUsdcAddress(e.target.value); localStorage.setItem('usdc_address', e.target.value); }} 
-                placeholder="0x..." 
-                style={{ background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.5rem', color: '#fff', fontSize: '0.85rem' }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>MockLendingPool Address</label>
-              <input 
-                type="text" 
-                value={lendingPoolAddress} 
-                onChange={(e) => { setLendingPoolAddress(e.target.value); localStorage.setItem('lending_pool_address', e.target.value); }} 
-                placeholder="0x..." 
-                style={{ background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.5rem', color: '#fff', fontSize: '0.85rem' }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>MockAMMPool Address</label>
-              <input 
-                type="text" 
-                value={ammPoolAddress} 
-                onChange={(e) => { setAmmPoolAddress(e.target.value); localStorage.setItem('amm_pool_address', e.target.value); }} 
-                placeholder="0x..." 
-                style={{ background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.5rem', color: '#fff', fontSize: '0.85rem' }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', gridColumn: 'span 2' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>MockPriceOracle Address</label>
-              <input 
-                type="text" 
-                value={priceOracleAddress} 
-                onChange={(e) => { setPriceOracleAddress(e.target.value); localStorage.setItem('price_oracle_address', e.target.value); }} 
-                placeholder="0x..." 
-                style={{ background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.5rem', color: '#fff', fontSize: '0.85rem' }}
-              />
-            </div>
+          <div className="metric-item">
+            <span className="metric-label">Net APY</span>
+            <span className="metric-value" style={{ color: 'var(--c-success)' }}>{fmt(netAPY, 2)}%</span>
           </div>
-          
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-            <button className="btn-secondary" style={{ padding: '0.5rem 1rem' }} onClick={() => setShowSettings(false)}>
-              Close Panel
-            </button>
-            <button className="btn-primary" style={{ padding: '0.5rem 1rem' }} onClick={() => { syncOnChainState(); addLog('system', 'Config synced with on-chain data.'); }}>
-              Sync Now
-            </button>
+          <div className="metric-item">
+            <span className="metric-label">Active Pools</span>
+            <span className="metric-value">{vaultConfig?.activePools?.length || 0}</span>
           </div>
-        </div>
-      )}
-
-      {/* Metrics Bar */}
-      <section className="metrics-row col-12">
-        <div className="metric-item">
-          <span className="metric-label">Vault AUM (USDC)</span>
-          <span className="metric-value cyan">
-            ${totalVaultAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
-        </div>
-        <div className="metric-item">
-          <span className="metric-label">Accrued Yield (Pending)</span>
-          <span className="metric-value purple">
-            +${(pendingLendingYield + pendingAmmYield).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-          </span>
-        </div>
-        <div className="metric-item">
-          <span className="metric-label">Net APY</span>
-          <span className="metric-value text-emerald-400" style={{ color: 'var(--color-success)' }}>
-            {((lendingAllocBps * lendingAPY + ammAllocBps * ammAPY) / 1000000).toFixed(2)}%
-          </span>
-        </div>
-        <div className="metric-item">
-          <span className="metric-label">Current Block</span>
-          <span className="metric-value" style={{ fontFamily: 'var(--font-mono)' }}>
-            #{blockNumber.toLocaleString()}
-          </span>
-        </div>
-      </section>
-
-      {/* Main Grid */}
-      <div className="dashboard-grid">
-        
-        {/* Left Column: Allocations & Sliders */}
-        <div className="col-8 glass-card">
-          <div className="card-title">
-            <h3><TrendingUp size={18} /> Portfolio Allocations & Risk Optimizer</h3>
-            <span className="badge-status sandbox">Optimal Risk Threshold: {riskLimit}</span>
+          <div className="metric-item">
+            <span className="metric-label">Pending Yield</span>
+            <span className="metric-value purple">+${fmt(poolDetails.reduce((s, p) => s + p.pendingYield, 0), 4)}</span>
           </div>
+          <div className="metric-item">
+            <span className="metric-label">Block</span>
+            <span className="metric-value mono">#{blockNumber.toLocaleString()}</span>
+          </div>
+          <div className="metric-item">
+            <span className="metric-label">DA Verified</span>
+            <span className="metric-value" style={{ color: vaultConfig?.daVerificationEnabled ? 'var(--c-success)' : 'var(--t-muted)' }}>
+              {vaultConfig?.daVerificationEnabled ? 'ON' : 'OFF'}
+            </span>
+          </div>
+        </section>
 
-          <div className="allocation-container">
-            {/* Custom SVG Donut Chart */}
-            <div className="donut-chart-wrapper">
-              <svg width="100%" height="100%" viewBox="0 0 42 42" className="donut-chart-svg">
-                <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="rgba(255,255,255,0.02)" strokeWidth="4"></circle>
-                
-                {/* Lending Pool segment */}
-                <circle cx="21" cy="21" r="15.915" fill="transparent" 
-                        className="donut-segment-lending"
-                        strokeWidth="4" 
-                        strokeDasharray={`${lendingPct} ${100 - lendingPct}`}
-                        strokeDashoffset="0"></circle>
-                
-                {/* AMM Pool segment */}
-                <circle cx="21" cy="21" r="15.915" fill="transparent" 
-                        className="donut-segment-amm"
-                        strokeWidth="4" 
-                        strokeDasharray={`${ammPct} ${100 - ammPct}`}
-                        strokeDashoffset={-lendingPct}></circle>
-              </svg>
-              <div className="chart-center-text">
-                <p className="chart-center-label">AUM Split</p>
-                <p className="chart-center-val">{lendingPct.toFixed(0)}/{ammPct.toFixed(0)}</p>
+        {/* User Position + Deposit/Withdraw — only when connected */}
+        {isConnected && (
+          <div className="grid-row grid-3">
+            <div className="card card-position">
+              <div className="card-header">
+                <h3><Coins size={18} /> Your Position</h3>
               </div>
-            </div>
-
-            {/* Allocations Legend */}
-            <div className="allocation-legend">
-              <div className="legend-item">
-                <div className="legend-color-label">
-                  <span className="legend-dot cyan"></span>
-                  <div>
-                    <p style={{ fontWeight: 600 }}>Lending Pool</p>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Risk score: {LENDING_RISK}</p>
-                  </div>
+              <div className="position-main">
+                <div className="position-value">
+                  <span className="position-label">Current Value</span>
+                  <span className="position-amount">${fmt(userPosition?.positionValue)}</span>
                 </div>
-                <div>
-                  <p className="legend-value">${totalLendingAssets.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--color-primary)', textAlign: 'right' }}>{lendingPct.toFixed(1)}%</p>
+                <div className="position-shares">
+                  <span className="position-label">Shares</span>
+                  <span className="position-num">{fmt(userPosition?.shares, 4)}</span>
                 </div>
               </div>
-
-              <div className="legend-item">
-                <div className="legend-color-label">
-                  <span className="legend-dot purple"></span>
-                  <div>
-                    <p style={{ fontWeight: 600 }}>AMM Pool</p>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Risk score: {AMM_RISK}</p>
-                  </div>
+              <div className="position-row">
+                <div className="position-item">
+                  <span className="muted">Wallet USDC</span>
+                  <span>${fmt(userPosition?.usdcBalance)}</span>
                 </div>
-                <div>
-                  <p className="legend-value">${totalAmmAssets.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--color-secondary)', textAlign: 'right' }}>{ammPct.toFixed(1)}%</p>
+                <div className="position-item">
+                  <span className="muted">Share Price</span>
+                  <span>${fmt(sharePrice, 6)}</span>
+                </div>
+                <div className="position-item">
+                  <span className="muted">Share of AUM</span>
+                  <span>{vaultAUM > 0 && userPosition ? fmt((userPosition.positionValue / vaultAUM) * 100, 2) : '0.00'}%</span>
                 </div>
               </div>
             </div>
-          </div>
 
-          <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)' }} />
-
-          {/* Market Shift Controller */}
-          <div className="card-title">
-            <h3><RefreshCw size={18} /> Market Shift Controller (Simulation Panel)</h3>
-          </div>
-
-          <div className="slider-group">
-            <div className="slider-item">
-              <div className="slider-label">
-                <span>Lending Pool Yield APY</span>
-                <span>{(lendingAPY / 100).toFixed(2)}%</span>
+            <div className="card card-action">
+              <div className="card-header"><h3><TrendingUp size={18} /> Deposit</h3></div>
+              <div className="action-body">
+                <div className="input-wrap">
+                  <input type="number" min="0" placeholder="0.00" value={depositAmount}
+                    onChange={e => setDepositAmount(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleDeposit()} />
+                  <span className="input-suffix">USDC</span>
+                </div>
+                <button className="btn-primary" onClick={handleDeposit} disabled={txPending || !depositAmount}>
+                  {txPending ? 'Confirming...' : 'Deposit'}
+                </button>
               </div>
-              <input 
-                type="range" 
-                min="100" 
-                max="1500" 
-                value={lendingAPY} 
-                onChange={(e) => setLendingAPY(parseInt(e.target.value))}
-              />
             </div>
 
-            <div className="slider-item">
-              <div className="slider-label">
-                <span>AMM Pool Fee APY</span>
-                <span>{(ammAPY / 100).toFixed(2)}%</span>
+            <div className="card card-action">
+              <div className="card-header"><h3><ArrowDownRight size={18} /> Withdraw</h3></div>
+              <div className="action-body">
+                <div className="input-wrap">
+                  <input type="number" min="0" placeholder="0.00" value={withdrawAmount}
+                    onChange={e => setWithdrawAmount(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleWithdraw()} />
+                  <span className="input-suffix">USDC</span>
+                </div>
+                <button className="btn-secondary" onClick={handleWithdraw} disabled={txPending || !withdrawAmount}>
+                  {txPending ? 'Confirming...' : 'Withdraw'}
+                </button>
               </div>
-              <input 
-                type="range" 
-                className="purple"
-                min="500" 
-                max="3000" 
-                value={ammAPY} 
-                onChange={(e) => setAMMAPY(parseInt(e.target.value))}
-              />
-            </div>
-            
-            <div className="slider-item">
-              <div className="slider-label">
-                <span>Risk Allowance Threshold</span>
-                <span>{riskLimit.toFixed(1)}</span>
-              </div>
-              <input 
-                type="range" 
-                min="10" 
-                max="30" 
-                step="1"
-                value={riskLimit * 10} 
-                onChange={(e) => setRiskLimit(parseInt(e.target.value) / 10)}
-              />
             </div>
           </div>
+        )}
 
-          {/* Control Triggers */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '0.5rem' }}>
-            <button className="btn-secondary" onClick={() => fastForwardBlocks(500)}>
-              <Play size={16} /> Fast-Forward +500 Blocks
-            </button>
-            <button className="btn-primary" onClick={handleRebalance} disabled={rebalancing}>
-              <RefreshCw size={16} className={rebalancing ? 'spin' : ''} />
-              {rebalancing ? 'Optimizing Strategy...' : 'Trigger AI Rebalance'}
-            </button>
-          </div>
-        </div>
-
-        {/* Right Column: Interactive Transactions & Terminal */}
-        <div className="col-4" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          
-          {/* User Vault Balance Card */}
-          <div className="glass-card">
-            <div className="card-title">
-              <h3><Coins size={18} /> AI-Governed Vault Gateway</h3>
-            </div>
-            
-            <div style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Your USDC Balance</span>
-                <span style={{ fontWeight: 700 }}>${userUSDC.toLocaleString()} USDC</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Your Vault Shares</span>
-                <span style={{ fontWeight: 700 }}>{userShares.toLocaleString(undefined, {maximumFractionDigits: 0})} cSHARES</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Estimated Value</span>
-                <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>${(userShares * sharePrice).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USDC</span>
-              </div>
-            </div>
-
-            {/* Deposit Form */}
-            <form onSubmit={handleDeposit} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ position: 'relative' }}>
-                <input 
-                  type="number" 
-                  value={depositAmount} 
-                  onChange={(e) => setDepositAmount(e.target.value)}
-                  style={{ width: '100%', background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', color: '#fff', fontSize: '0.9rem', outline: 'none' }}
-                />
-                <span style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>USDC</span>
-              </div>
-              <button type="submit" className="btn-primary" style={{ padding: '0.65rem' }}>
-                Deposit into Vault
+        {/* Not connected prompt */}
+        {!isConnected && (
+          <div className="connect-prompt">
+            <div className="connect-prompt-inner">
+              <Wallet size={24} />
+              <p>Connect your wallet to deposit USDC and start earning</p>
+              <button className="btn-primary" style={{ maxWidth: '240px' }} onClick={() => open()}>
+                Connect Wallet
               </button>
-            </form>
-
-            {/* Withdraw Form */}
-            <form onSubmit={handleWithdraw} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ position: 'relative' }}>
-                <input 
-                  type="number" 
-                  value={withdrawShares} 
-                  onChange={(e) => setWithdrawShares(e.target.value)}
-                  style={{ width: '100%', background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', color: '#fff', fontSize: '0.9rem', outline: 'none' }}
-                />
-                <span style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>SHARES</span>
-              </div>
-              <button type="submit" className="btn-secondary" style={{ padding: '0.65rem' }}>
-                Withdraw from Vault
-              </button>
-            </form>
-          </div>
-
-          {/* AI Thought Feed Terminal */}
-          <div className="glass-card" style={{ flex: 1 }}>
-            <div className="card-title">
-              <h3><Cpu size={18} /> AI Thought Feed (TEE logs)</h3>
             </div>
-            
-            <div className="terminal-window">
-              <div className="terminal-header">
-                <div className="terminal-dots">
-                  <span className="terminal-dot red"></span>
-                  <span className="terminal-dot yellow"></span>
-                  <span className="terminal-dot green"></span>
+          </div>
+        )}
+
+        {/* Allocation + Performance */}
+        <div className="grid-row grid-2-1">
+          <div className="card">
+            <div className="card-header">
+              <h3><Activity size={18} /> Vault Allocation</h3>
+              <span className="badge-live">{poolDetails.length} pools</span>
+            </div>
+            <div className="alloc-layout">
+              <div className="donut-wrap">
+                <svg width="100%" height="100%" viewBox="0 0 42 42" className="donut-svg">
+                  <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="rgba(255,255,255,0.04)" strokeWidth="4" />
+                  {allocationData.map((seg, i) => {
+                    const prev = allocationData.slice(0, i).reduce((s, x) => s + x.pct, 0);
+                    return (
+                      <circle key={i} cx="21" cy="21" r="15.915" fill="transparent"
+                        stroke={seg.color} strokeWidth="4"
+                        strokeDasharray={`${seg.pct} ${100 - seg.pct}`}
+                        strokeDashoffset={-prev}
+                        style={{ transition: 'stroke-dasharray 0.8s ease, stroke-dashoffset 0.8s ease' }}
+                      />
+                    );
+                  })}
+                </svg>
+                <div className="donut-center">
+                  <span className="donut-center-label">AUM</span>
+                  <span className="donut-center-val">${fmt(vaultAUM, 0)}</span>
                 </div>
-                <span className="terminal-title">tee-node-0g-compute</span>
               </div>
-              <div className="terminal-content" id="terminal-feed">
-                {logs.map((log, index) => (
-                  <div key={index} className={`terminal-line ${log.type}`}>
-                    &gt; {log.text}
+              <div className="alloc-pools">
+                {poolDetails.map((pool, i) => (
+                  <div className="pool-row" key={i}>
+                    <div className="pool-row-left">
+                      <span className="pool-dot" style={{ background: pool.color }} />
+                      <div>
+                        <div className="pool-name">{pool.name}</div>
+                        <div className="pool-sub muted">Risk {pool.risk} · {fmtAddr(pool.address)}</div>
+                      </div>
+                    </div>
+                    <div className="pool-row-right">
+                      <div className="pool-apy">{(pool.apy / 100).toFixed(2)}%</div>
+                      <div className="pool-bal muted">${fmt(pool.balance, 0)}</div>
+                      <div className="pool-yield">+${fmt(pool.pendingYield, 4)}</div>
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
           </div>
-        </div>
 
-        {/* 0G Pipeline State Visualizer */}
-        <div className="col-12 glass-card">
-          <div className="card-title">
-            <h3><Database size={18} /> 0G Pipeline Transaction Cycle</h3>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Verifiable AI Rebalance State Machine</span>
-          </div>
-          
-          <div className="pipeline-flow">
-            <div className={`pipeline-step ${activeStep === 1 ? 'active' : activeStep > 1 ? 'success' : ''}`}>
-              <div className="pipeline-icon">
-                <Database size={16} />
-              </div>
-              <h4>0G Storage</h4>
-              <p>
-                {activeStep > 1 
-                  ? `Verified root: ${storageRoot.substring(0, 8)}...${storageRoot.substring(storageRoot.length - 4)}` 
-                  : activeStep === 1 
-                    ? 'Verifying Merkle proof...' 
-                    : 'Idle state'}
-              </p>
+          <div className="card">
+            <div className="card-header">
+              <h3><TrendingUp size={18} /> Performance</h3>
+              <span className="badge-live">{chartData.length} runs</span>
             </div>
-            
-            <div className={`pipeline-step ${activeStep === 2 ? 'active' : activeStep > 2 ? 'success' : ''}`}>
-              <div className="pipeline-icon">
-                <Cpu size={16} />
+            {chartData.length > 0 ? (
+              <div className="chart-wrap">
+                <ResponsiveContainer>
+                  <AreaChart data={chartData} margin={{ top: 10, right: 5, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="gradLending" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#00f2fe" stopOpacity={0.3} />
+                        <stop offset="100%" stopColor="#00f2fe" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="gradAmm" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#a855f7" stopOpacity={0.3} />
+                        <stop offset="100%" stopColor="#a855f7" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                    <XAxis dataKey="label" stroke="#64748b" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#64748b" fontSize={11} tickLine={false} unit="%" />
+                    <Tooltip contentStyle={{ background: '#0d121f', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', fontSize: '0.8rem' }} labelStyle={{ color: '#94a3b8' }} />
+                    <Area type="monotone" dataKey="lending" name="Lending %" stroke="#00f2fe" strokeWidth={2} fill="url(#gradLending)" />
+                    <Area type="monotone" dataKey="amm" name="AMM %" stroke="#a855f7" strokeWidth={2} fill="url(#gradAmm)" />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
-              <h4>0G Compute</h4>
-              <p>{activeStep > 2 ? 'TEE Signed payload' : activeStep === 2 ? 'Solving LP model...' : 'Idle state'}</p>
-            </div>
-
-            <div className={`pipeline-step ${activeStep === 3 ? 'active' : activeStep > 3 ? 'success' : ''}`}>
-              <div className="pipeline-icon">
-                <Shield size={16} />
+            ) : (
+              <div className="chart-empty">
+                <Activity size={28} />
+                <p>No pipeline history yet</p>
               </div>
-              <h4>0G DA</h4>
-              <p>{activeStep > 3 ? 'Proof finalized' : activeStep === 3 ? 'Dispersing blob...' : 'Idle state'}</p>
-            </div>
-
-            <div className={`pipeline-step ${activeStep === 4 ? 'active' : activeStep > 4 ? 'success' : ''}`}>
-              <div className="pipeline-icon">
-                <ArrowRightLeft size={16} />
-              </div>
-              <h4>0G Chain (EVM)</h4>
-              <p>{activeStep === 4 ? 'Executing rebalance...' : 'Idle state'}</p>
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Performance Graph Card */}
-        <div className="col-12 glass-card">
-          <div className="card-title">
-            <h3><TrendingUp size={18} /> Profit & Performance vs Static Baseline</h3>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Comparing AUM expansion over successive runs</span>
-          </div>
-
-          <div className="perf-graph-container">
-            {history.map((h, i) => {
-              // Calculate percentage height relative to max value
-              const maxVal = Math.max(...history.map(item => Math.max(item.vault, item.baseline)));
-              const vaultHeight = (h.vault / maxVal) * 100;
-              const baseHeight = (h.baseline / maxVal) * 100;
-
-              return (
-                <div key={i} className="perf-bar-group">
-                  <div className="perf-bars">
-                    <div className="perf-bar baseline" style={{ height: `${baseHeight}%` }}></div>
-                    <div className="perf-bar vault" style={{ height: `${vaultHeight}%` }}></div>
+        {/* AI Activity + Pipeline */}
+        <div className="grid-row grid-1-1">
+          <div className="card card-terminal">
+            <div className="card-header">
+              <h3><Cpu size={18} /> AI Activity Feed</h3>
+              <span className="badge-live"><span className="live-dot" /> Live</span>
+            </div>
+            <div className="terminal">
+              <div className="terminal-body">
+                {logs.length === 0 && <div className="term-line muted">Waiting for activity...</div>}
+                {logs.map(log => (
+                  <div key={log.id} className={`term-line term-${log.type}`}>
+                    <span className="term-time">{log.time}</span>
+                    {log.text}
                   </div>
-                  <span className="perf-label">{h.label}</span>
-                </div>
-              );
-            })}
+                ))}
+              </div>
+            </div>
           </div>
 
-          <div className="perf-legend-row">
-            <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <span style={{ display: 'inline-block', width: '12px', height: '12px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px' }}></span>
-              Static Single Pool (Lending APY only)
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <span style={{ display: 'inline-block', width: '12px', height: '12px', background: 'linear-gradient(to top, var(--color-primary), var(--color-accent))', borderRadius: '3px', boxShadow: 'var(--glow-shadow)' }}></span>
-              CogniVault (AI Rebalanced, Max Yield/Risk)
-            </span>
+          <div className="card">
+            <div className="card-header">
+              <h3><Zap size={18} /> 0G Pipeline</h3>
+              <button className="btn-sm" onClick={fetchPipelineState}>
+                <RefreshCw size={12} /> Refresh
+              </button>
+            </div>
+            <div className="pipeline">
+              {pipelineSteps.map((step, i) => (
+                <div key={i} className={`pipeline-node ${step.active ? 'active' : ''}`}>
+                  <div className="pipeline-node-icon"><step.icon size={16} /></div>
+                  <div className="pipeline-node-body">
+                    <span className="pipeline-node-label">{step.label}</span>
+                    <span className="pipeline-node-detail muted">{step.detail}</span>
+                  </div>
+                  {step.active && <CheckCircle2 size={14} className="pipeline-check" />}
+                </div>
+              ))}
+            </div>
+            {latestRun && (
+              <div className="pipeline-latest">
+                <div className="pipeline-latest-row">
+                  <span className="muted">Last Strategy</span>
+                  <span className="mono">[{latestRun.allocations.join(', ')}] bps</span>
+                </div>
+                <div className="pipeline-latest-row">
+                  <span className="muted">DA Root</span>
+                  <span className="mono">{latestRun.da_data_root ? fmtAddr('0x' + latestRun.da_data_root) : 'N/A'}</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
+        {/* Market Sim (collapsible, owner-gated) */}
+        {showMarketPanel && (
+          <div className="card card-market">
+            <div className="card-header">
+              <h3><Sparkles size={18} /> Market Simulation</h3>
+              <span className={`badge ${isOwner ? 'badge-ok' : 'badge-warn'}`}>
+                {isOwner ? 'Owner Connected' : 'Owner Only'}
+              </span>
+            </div>
+            <p className="market-desc muted">
+              Simulate real market yield changes. Adjust pool APYs to see CogniVault's AI autonomously detect and rebalance.
+            </p>
+            <div className="market-sliders">
+              <div className="slider-row">
+                <div className="slider-top">
+                  <span>Lending Pool APY</span>
+                  <span className="slider-val">{(lendingApyInput / 100).toFixed(2)}%</span>
+                </div>
+                <input type="range" min="100" max="2000" value={lendingApyInput}
+                  disabled={!isOwner}
+                  onChange={e => setLendingApyInput(parseInt(e.target.value))} />
+              </div>
+              <div className="slider-row">
+                <div className="slider-top">
+                  <span>AMM Pool APY</span>
+                  <span className="slider-val">{(ammApyInput / 100).toFixed(2)}%</span>
+                </div>
+                <input type="range" className="purple" min="500" max="3000" value={ammApyInput}
+                  disabled={!isOwner}
+                  onChange={e => setAmmApyInput(parseInt(e.target.value))} />
+              </div>
+            </div>
+            <div className="market-actions">
+              <button className="btn-secondary" onClick={handleMarketShift} disabled={!isOwner || marketShiftPending}>
+                <RefreshCw size={15} className={marketShiftPending ? 'spin' : ''} />
+                {marketShiftPending ? 'Updating...' : 'Apply Market Change'}
+              </button>
+              <button className="btn-primary" onClick={handleTriggerRebalance} disabled={rebalancePending}>
+                <Zap size={15} className={rebalancePending ? 'spin' : ''} />
+                {rebalancePending ? 'Rebalancing...' : 'Trigger Rebalance'}
+              </button>
+            </div>
+            {lastRebalanceTx && (
+              <div className="market-tx">
+                <CheckCircle2 size={14} /> Last rebalance: <span className="mono">{fmtAddr(lastRebalanceTx)}</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
