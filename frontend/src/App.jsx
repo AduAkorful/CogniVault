@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
 import { 
   TrendingUp, Shield, Database, Cpu, Play, RefreshCw, 
   ChevronRight, Info, CheckCircle2, ArrowRightLeft, 
-  Wallet, Lock, Coins, FileText, ChevronDown 
+  Wallet, Lock, Coins, FileText, ChevronDown, Settings 
 } from 'lucide-react';
+import { VAULT_ABI, ERC20_ABI, POOL_ABI, DEFAULT_ADDRESSES } from './config/contracts';
+import { useVault } from './hooks/useVault';
 
 const BLOCKS_PER_YEAR = 10512000; // 3 seconds per block
 const LENDING_RISK = 1.2;
@@ -14,6 +17,26 @@ function App() {
   const [walletConnected, setWalletConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState('');
   const [sandboxMode, setSandboxMode] = useState(true);
+
+  // Galileo Testnet config states (persisted in localStorage)
+  const [vaultAddress, setVaultAddress] = useState(localStorage.getItem('vault_address') || '');
+  const [usdcAddress, setUsdcAddress] = useState(localStorage.getItem('usdc_address') || '');
+  const [lendingPoolAddress, setLendingPoolAddress] = useState(localStorage.getItem('lending_pool_address') || '');
+  const [ammPoolAddress, setAmmPoolAddress] = useState(localStorage.getItem('amm_pool_address') || '');
+  const [priceOracleAddress, setPriceOracleAddress] = useState(localStorage.getItem('price_oracle_address') || '');
+  const [showSettings, setShowSettings] = useState(false);
+  const [signer, setSigner] = useState(null);
+
+  useEffect(() => {
+    if (walletConnected && window.ethereum) {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      provider.getSigner().then(setSigner).catch(console.error);
+    } else {
+      setSigner(null);
+    }
+  }, [walletConnected]);
+
+  const { deposit: vaultDeposit, redeem: vaultRedeem } = useVault(vaultAddress, usdcAddress, signer);
 
   // Simulation State Variables
   const [blockNumber, setBlockNumber] = useState(12800540);
@@ -46,6 +69,7 @@ function App() {
   // Pipeline execution animation state
   const [activeStep, setActiveStep] = useState(0); // 0 = idle, 1 = Storage, 2 = Compute, 3 = DA, 4 = EVM
   const [rebalancing, setRebalancing] = useState(false);
+  const [storageRoot, setStorageRoot] = useState('0xe1b0defd92d2277d7a8239f648207fca3e731205a925f3dc740449280b9255f3');
 
   // Terminal Logs Feed
   const [logs, setLogs] = useState([
@@ -64,17 +88,149 @@ function App() {
   ]);
 
   // Connect wallet helper
-  const connectWallet = () => {
+  const connectWallet = async () => {
     if (walletConnected) {
       setWalletConnected(false);
       setWalletAddress('');
       setSandboxMode(true);
+      addLog('system', 'Wallet disconnected. Switched to sandbox simulator.');
     } else {
-      setWalletConnected(true);
-      setWalletAddress('0x40ea...c084');
-      setSandboxMode(false);
-      addLog('system', 'Wallet connected. switched to live network tracking.');
+      if (!window.ethereum) {
+        alert('MetaMask or another Web3 wallet provider was not detected.');
+        return;
+      }
+      try {
+        addLog('system', 'Requesting wallet connection...');
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const accounts = await provider.send("eth_requestAccounts", []);
+        if (accounts.length > 0) {
+          setWalletConnected(true);
+          setWalletAddress(accounts[0]);
+          setSandboxMode(false);
+          addLog('system', `Wallet connected: ${accounts[0]}. Switched to Galileo Testnet mode.`);
+        }
+      } catch (err) {
+        console.error(err);
+        addLog('error', `Wallet connection failed: ${err.message}`);
+      }
     }
+  };
+
+  // On-chain state sync
+  const syncOnChainState = async () => {
+    if (!window.ethereum || !walletConnected || sandboxMode) return;
+    try {
+      if (!vaultAddress || !usdcAddress || !lendingPoolAddress || !ammPoolAddress) {
+        return;
+      }
+
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const userAddr = walletAddress;
+
+      const vaultContract = new ethers.Contract(vaultAddress, VAULT_ABI, provider);
+      const usdcContract = new ethers.Contract(usdcAddress, ERC20_ABI, provider);
+      const lendingContract = new ethers.Contract(lendingPoolAddress, POOL_ABI, provider);
+      const ammContract = new ethers.Contract(ammPoolAddress, POOL_ABI, provider);
+
+      // Fetch block number
+      const blockNum = await provider.getBlockNumber();
+      setBlockNumber(blockNum);
+
+      // Fetch user balances
+      const usdcBal = await usdcContract.balanceOf(userAddr);
+      const userSharesBal = await vaultContract.balanceOf(userAddr);
+      
+      const totalSharesBalRaw = await provider.call({
+        to: vaultAddress,
+        data: ethers.id("totalSupply()").substring(0, 10)
+      });
+      const totalSharesUint = totalSharesBalRaw !== "0x" ? ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], totalSharesBalRaw)[0] : 0n;
+
+      setUserUSDC(Number(ethers.formatUnits(usdcBal, 6)));
+      setUserShares(Number(ethers.formatUnits(userSharesBal, 18)));
+      setTotalShares(Number(ethers.formatUnits(totalSharesUint, 18)));
+
+      // Vault balances inside pools
+      const lendingPoolBal = await lendingContract.balanceOf(vaultAddress);
+      const ammPoolBal = await ammContract.balanceOf(vaultAddress);
+      const idleBal = await usdcContract.balanceOf(vaultAddress);
+
+      const formattedLending = Number(ethers.formatUnits(lendingPoolBal, 6));
+      const formattedAmm = Number(ethers.formatUnits(ammPoolBal, 6));
+      const formattedIdle = Number(ethers.formatUnits(idleBal, 6));
+
+      setVaultLendingPrincipal(formattedLending);
+      setVaultAmmPrincipal(formattedAmm);
+      setVaultIdleUSDC(formattedIdle);
+
+      // Fetch APYs
+      const lendingApyVal = await lendingContract.getAPY();
+      const ammApyVal = await ammContract.getAPY();
+      setLendingAPY(Number(lendingApyVal));
+      setAMMAPY(Number(ammApyVal));
+
+      // Calculate allocations
+      const totalPrincipal = formattedLending + formattedAmm + formattedIdle;
+      if (totalPrincipal > 0) {
+        setLendingAllocBps(Math.round((formattedLending * 10000) / totalPrincipal));
+        setAmmAllocBps(Math.round((formattedAmm * 10000) / totalPrincipal));
+      }
+
+      setLendingLastBlock(blockNum);
+      setAmmLastBlock(blockNum);
+
+    } catch (err) {
+      console.error("On-chain sync error:", err);
+    }
+  };
+
+  // Wallet listeners
+  useEffect(() => {
+    if (window.ethereum) {
+      const handleAccountsChanged = (accounts) => {
+        if (accounts.length > 0) {
+          setWalletAddress(accounts[0]);
+          addLog('system', `Wallet account changed: ${accounts[0]}`);
+        } else {
+          setWalletConnected(false);
+          setWalletAddress('');
+          setSandboxMode(true);
+          addLog('system', 'Wallet disconnected.');
+        }
+      };
+      
+      const handleChainChanged = () => {
+        window.location.reload();
+      };
+
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', handleChainChanged);
+
+      return () => {
+        if (window.ethereum.removeListener) {
+          window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+          window.ethereum.removeListener('chainChanged', handleChainChanged);
+        }
+      };
+    }
+  }, []);
+
+  // Poll state on Galileo Testnet
+  useEffect(() => {
+    if (sandboxMode || !walletConnected) return;
+    syncOnChainState();
+    const interval = setInterval(syncOnChainState, 8000);
+    return () => clearInterval(interval);
+  }, [sandboxMode, walletConnected, vaultAddress, usdcAddress, lendingPoolAddress, ammPoolAddress]);
+
+  // Live Deposit transaction logic
+  const handleLiveDeposit = async (amount) => {
+    await vaultDeposit(amount, walletAddress, addLog, syncOnChainState);
+  };
+
+  // Live Withdraw transaction logic
+  const handleLiveWithdraw = async (shares) => {
+    await vaultRedeem(shares, walletAddress, addLog, syncOnChainState);
   };
 
   // Log helper
@@ -129,6 +285,10 @@ function App() {
     addLog('info', '[0G Storage] Querying historical yield and pool risk vectors...');
     
     setTimeout(() => {
+      addLog('info', `[0G Storage] Merkle Root Detected: ${storageRoot}`);
+      addLog('info', '[0G Storage] Downloading file & verifying Merkle path inclusion proof...');
+      addLog('info', '[0G Storage] Proof verification complete. Ingested historical yield records.');
+      
       // Step 2: Compute
       setActiveStep(2);
       addLog('info', '[0G Compute] Resolving optimization model in secure TEE...');
@@ -197,6 +357,11 @@ function App() {
             addLog('system', 'Rebalance transaction executed and confirmed on-chain!');
             addLog('info', `✔ Vault positions successfully rotated.`);
             
+            // Generate next storage root to simulate log aggregator upload
+            const nextRoot = '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
+            setStorageRoot(nextRoot);
+            addLog('system', `[0G Storage] Aggregated logs uploaded. New Merkle root: ${nextRoot}`);
+            
             setActiveStep(0);
             setRebalancing(false);
           }, 1500);
@@ -210,6 +375,12 @@ function App() {
     e.preventDefault();
     const amount = parseFloat(depositAmount);
     if (isNaN(amount) || amount <= 0) return;
+
+    if (!sandboxMode) {
+      handleLiveDeposit(depositAmount);
+      return;
+    }
+
     if (amount > userUSDC) {
       alert("Insufficient USDC balance");
       return;
@@ -243,6 +414,12 @@ function App() {
     e.preventDefault();
     const shares = parseFloat(withdrawShares);
     if (isNaN(shares) || shares <= 0) return;
+
+    if (!sandboxMode) {
+      handleLiveWithdraw(withdrawShares);
+      return;
+    }
+
     if (shares > userShares) {
       alert("Insufficient share balance");
       return;
@@ -295,12 +472,106 @@ function App() {
             <span className="pulse-dot"></span>
             {sandboxMode ? 'Sandbox Simulator' : 'Galileo Testnet'}
           </div>
+          <button className="badge-wallet" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} onClick={() => setShowSettings(!showSettings)}>
+            <Settings size={16} />
+            <span>Config</span>
+          </button>
           <button className="badge-wallet" onClick={connectWallet}>
             <Wallet size={16} />
-            <span>{walletConnected ? walletAddress : 'Connect Wallet'}</span>
+            <span>{walletConnected ? `${walletAddress.substring(0, 6)}...${walletAddress.substring(walletAddress.length - 4)}` : 'Connect Wallet'}</span>
           </button>
         </div>
       </header>
+
+      {showSettings && (
+        <div className="glass-card" style={{ padding: '1.5rem', border: '1px solid var(--color-primary)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Settings size={18} /> Galileo Testnet Configuration</h3>
+            <button className="badge-status sandbox" style={{ cursor: 'pointer', border: 'none', background: 'rgba(0, 242, 254, 0.15)', color: 'var(--color-primary)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem' }} onClick={() => {
+              setVaultAddress(DEFAULT_ADDRESSES.vault); 
+              setUsdcAddress(DEFAULT_ADDRESSES.usdc);
+              setLendingPoolAddress(DEFAULT_ADDRESSES.lendingPool);
+              setAmmPoolAddress(DEFAULT_ADDRESSES.ammPool);
+              setPriceOracleAddress(DEFAULT_ADDRESSES.priceOracle);
+              
+              localStorage.setItem('vault_address', DEFAULT_ADDRESSES.vault);
+              localStorage.setItem('usdc_address', DEFAULT_ADDRESSES.usdc);
+              localStorage.setItem('lending_pool_address', DEFAULT_ADDRESSES.lendingPool);
+              localStorage.setItem('amm_pool_address', DEFAULT_ADDRESSES.ammPool);
+              localStorage.setItem('price_oracle_address', DEFAULT_ADDRESSES.priceOracle);
+              addLog('system', 'Pre-populated Galileo testnet addresses.');
+            }}>
+              Prepopulate Example
+            </button>
+          </div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>AIGovernedVault Address</label>
+              <input 
+                type="text" 
+                value={vaultAddress} 
+                onChange={(e) => { setVaultAddress(e.target.value); localStorage.setItem('vault_address', e.target.value); }} 
+                placeholder="0x..." 
+                style={{ background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.5rem', color: '#fff', fontSize: '0.85rem' }}
+              />
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>MockUSDC Address</label>
+              <input 
+                type="text" 
+                value={usdcAddress} 
+                onChange={(e) => { setUsdcAddress(e.target.value); localStorage.setItem('usdc_address', e.target.value); }} 
+                placeholder="0x..." 
+                style={{ background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.5rem', color: '#fff', fontSize: '0.85rem' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>MockLendingPool Address</label>
+              <input 
+                type="text" 
+                value={lendingPoolAddress} 
+                onChange={(e) => { setLendingPoolAddress(e.target.value); localStorage.setItem('lending_pool_address', e.target.value); }} 
+                placeholder="0x..." 
+                style={{ background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.5rem', color: '#fff', fontSize: '0.85rem' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>MockAMMPool Address</label>
+              <input 
+                type="text" 
+                value={ammPoolAddress} 
+                onChange={(e) => { setAmmPoolAddress(e.target.value); localStorage.setItem('amm_pool_address', e.target.value); }} 
+                placeholder="0x..." 
+                style={{ background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.5rem', color: '#fff', fontSize: '0.85rem' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', gridColumn: 'span 2' }}>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>MockPriceOracle Address</label>
+              <input 
+                type="text" 
+                value={priceOracleAddress} 
+                onChange={(e) => { setPriceOracleAddress(e.target.value); localStorage.setItem('price_oracle_address', e.target.value); }} 
+                placeholder="0x..." 
+                style={{ background: '#04060b', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.5rem', color: '#fff', fontSize: '0.85rem' }}
+              />
+            </div>
+          </div>
+          
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+            <button className="btn-secondary" style={{ padding: '0.5rem 1rem' }} onClick={() => setShowSettings(false)}>
+              Close Panel
+            </button>
+            <button className="btn-primary" style={{ padding: '0.5rem 1rem' }} onClick={() => { syncOnChainState(); addLog('system', 'Config synced with on-chain data.'); }}>
+              Sync Now
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Metrics Bar */}
       <section className="metrics-row col-12">
@@ -559,7 +830,13 @@ function App() {
                 <Database size={16} />
               </div>
               <h4>0G Storage</h4>
-              <p>{activeStep > 1 ? 'Context loaded' : activeStep === 1 ? 'Fetching APYs...' : 'Idle state'}</p>
+              <p>
+                {activeStep > 1 
+                  ? `Verified root: ${storageRoot.substring(0, 8)}...${storageRoot.substring(storageRoot.length - 4)}` 
+                  : activeStep === 1 
+                    ? 'Verifying Merkle proof...' 
+                    : 'Idle state'}
+              </p>
             </div>
             
             <div className={`pipeline-step ${activeStep === 2 ? 'active' : activeStep > 2 ? 'success' : ''}`}>

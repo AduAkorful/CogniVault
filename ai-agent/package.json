@@ -1,0 +1,22 @@
+{
+  "name": "cognivault-ai-agent-aggregator",
+  "version": "1.0.0",
+  "description": "Log aggregator for CogniVault yield metrics uploading to 0G Storage",
+  "main": "log_aggregator.js",
+  "type": "module",
+  "scripts": {
+    "start": "node log_aggregator.js",
+    "compute": "node compute_client.js",
+    "da": "node da_client.js",
+    "relayer": "node relayer.js",
+    "relayer:mock": "MOCK_RELAYER=true MOCK_COMPUTE=true MOCK_STORAGE=true MOCK_DA=true node relayer.js"
+  },
+  "dependencies": {
+    "@0gfoundation/0g-storage-ts-sdk": "^1.2.10",
+    "@0gfoundation/0g-compute-ts-sdk": "^0.8.4",
+    "@grpc/grpc-js": "^1.12.6",
+    "@grpc/proto-loader": "^0.7.13",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.1"
+  }
+}

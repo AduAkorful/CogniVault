@@ -1,0 +1,24 @@
+# CogniVault 0G DA Infrastructure
+# Usage: docker compose up -d
+# Requires: envfile.env with your COMBINED_SERVER_PRIVATE_KEY
+#
+# The DA Client node handles blob dispersal to the 0G DA network.
+# It exposes a gRPC endpoint on port 51001 for the CogniVault relayer.
+
+services:
+  da-client:
+    image: 0g-da-client
+    container_name: cognivault-da-client
+    env_file: envfile.env
+    ports:
+      - "51001:51001"
+    volumes:
+      - ./run:/runtime
+    command: combined
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 51001 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

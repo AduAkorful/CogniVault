@@ -32,6 +32,43 @@ Since Galileo Testnet does not host official public instances of lending or AMM 
 
 ---
 
+## 🚀 Deployment & Setup Instructions
+
+To deploy the smart contract suite (`MockUSDC`, `MockW0G`, `MockLendingPool`, `MockAMMPool`, and `AIGovernedVault`) to the 0G Galileo Testnet:
+
+1.  **Environment Variables:**
+    Configure the private key of the deploying wallet and the TEE signer public address:
+    ```bash
+    export PRIVATE_KEY="0x..." # Your deployer private key
+    export TEE_SIGNER="0x822B9030e8051cC296c5B76ad8B1Bcb9dbF8eB62"  # TEE signer address
+    ```
+
+2.  **Execute Forge Script:**
+    Run the deployment script pointing to the Galileo Testnet RPC endpoint:
+    ```bash
+    cd contracts
+    forge script script/DeployCogniVault.s.sol:DeployCogniVault \
+      --rpc-url https://evmrpc-testnet.0g.ai \
+      --broadcast \
+      --legacy \
+      --gas-limit 10000000
+    ```
+
+3.  **AI Agent & 0G Compute Production Setup:**
+    To transition the off-chain agent to the live 0G Compute Network:
+    * **Fund the Coordinator Account:** Ensure the agent's account (`PRIVATE_KEY`) has a balance of A0GI tokens to pay for compute inference fees and 0G Storage gas.
+    * **Select a Registered Provider:** Obtain a valid provider wallet address registered on the 0G Compute Network.
+    * **Configure Production Environment Variables:**
+      ```bash
+      export PRIVATE_KEY="0x..."            # Agent coordinator private key
+      export COMPUTE_PROVIDER="0x..."        # Selected 0G Compute Provider address
+      export MOCK_COMPUTE="false"            # Enable live TEE broker queries
+      export MOCK_STORAGE="false"            # Enable live 0G Storage queries
+      ```
+    * **Run the Pipeline:** The SDK broker automatically coordinates session creation and payment when the agent initiates rebalance cycles.
+
+---
+
 ## 🗺️ Progress Dashboard
 
 ```
@@ -42,12 +79,12 @@ Since Galileo Testnet does not host official public instances of lending or AMM 
   [x] Checkpoint 1.4: Premium React Frontend Dashboard
   [x] Checkpoint 1.5: Automated Testing & Verification
   [x] Checkpoint 1.6: Security Refinements (Gas & Loop Limits)
-[ ] Iteration 2: 0G Storage Integration (Deadline: June 28)
-  [ ] Checkpoint 2.1: Periodic DB Log Aggregator
-  [ ] Checkpoint 2.2: AI Agent Storage SDK Integration
-[ ] Iteration 3: 0G Compute Network Integration (Deadline: July 4)
-  [ ] Checkpoint 3.1: 0G Compute SDK Inference requests
-  [ ] Checkpoint 3.2: Solidity TEE Signature Verifier
+[x] Iteration 2: 0G Storage Integration (Deadline: June 28)
+  [x] Checkpoint 2.1: Periodic DB Log Aggregator
+  [x] Checkpoint 2.2: AI Agent Storage SDK Integration
+[x] Iteration 3: 0G Compute Network Integration (Deadline: July 4)
+  [x] Checkpoint 3.1: 0G Compute SDK Inference requests
+  [x] Checkpoint 3.2: Solidity TEE Signature Verifier
 [ ] Iteration 4: 0G DA Integration & Relayer (Deadline: July 8)
   [ ] Checkpoint 4.1: 0G DA Client Disperser
   [ ] Checkpoint 4.2: On-chain DA Proof Verification
@@ -131,61 +168,72 @@ Since Galileo Testnet does not host official public instances of lending or AMM 
 ### 💾 Iteration 2: 0G Storage Integration (Deadline: June 28)
 **Objective:** Store and download historical APY data logs using 0G Storage KV / Indexer.
 
-#### [ ] Checkpoint 2.1: Periodic DB Log Aggregator
+#### [x] Checkpoint 2.1: Periodic DB Log Aggregator
 *   **Deliverables:**
     *   Deploy a node script that logs yield pool metrics to a local database and uploads it to 0G Storage as a `ZgFile`.
 *   **Developer Execution Notes:**
-    *   *Add script configuration details here.*
+    *   Implemented `log_aggregator.js` inside `/ai-agent/`.
+    *   Integrates the official `@0gfoundation/0g-storage-ts-sdk` Indexer uploading mechanism in live production mode.
+    *   Supports offline simulation by compiling data, constructing a local mock database, generating the binary Merkle tree with Keccak256, and writing chunk-by-chunk proof files when `MOCK_STORAGE=true`.
+    *   Updates the `state.json` contract state file dynamically with the generated storage root hash to connect the pipeline stages.
 
-#### [ ] Checkpoint 2.2: AI Agent Storage SDK Integration
+#### [x] Checkpoint 2.2: AI Agent Storage SDK Integration
 *   **Deliverables:**
     *   Update `/ai-agent/simulator.py` to retrieve historical records from 0G Storage, verify Merkle inclusion, and pass it as context to the rebalancing model.
 *   **Developer Execution Notes:**
-    *   *Add transaction/blob info here.*
+    *   Added custom `ZeroGStorageClient` class in Python `/ai-agent/storage_client.py` for downloading files.
+    *   In live production mode, downloads files using the Indexer REST API (`GET /file?root=...`) and computes the Keccak256 Merkle root to confirm payload authenticity.
+    *   In mock mode, loads local JSON logs and implements standard Merkle inclusion path verification to validate segment authenticity chunk-by-chunk.
+    *   Integrated client into `simulator.py` rebalancing loop, ensuring verified historical context is loaded before run optimizations.
 
 ---
 
 ### 🖥️ Iteration 3: 0G Compute Network Integration (Deadline: July 4)
 **Objective:** Run the AI model in a verifiable TEE and verify the execution signature on-chain.
 
-#### [ ] Checkpoint 3.1: 0G Compute SDK Inference Requests
+#### [x] Checkpoint 3.1: 0G Compute SDK Inference Requests
 *   **Deliverables:**
     *   Integrate `@0gfoundation/0g-compute-ts-sdk` broker client to dispatch inference tasks to active 0G compute providers.
 *   **Developer Execution Notes:**
-    *   *Add broker contract addresses and providers here.*
+    *   Configured Node.js SDK using the renamed official package `@0gfoundation/0g-compute-ts-sdk` (installed version `^0.8.4`).
+    *   Implemented `ai-agent/compute_client.js` which initializes the `ZGComputeNetworkBroker`, retrieves provider metadata, generates authorization request headers, calls the provider chat endpoint, and checks response integrity via `broker.inference.processResponse()`.
+    *   Created a robust fallback simulation mode that evaluates current pool yield vectors analytically using risk-bounded optimization and signs the result using the simulated TEE private key `0x5de...`.
+    *   Modified `ai-agent/simulator.py` to trigger the compute client via a subprocess and load the completed execution run context directly from `state.json`.
 
-#### [ ] Checkpoint 3.2: Solidity TEE Signature Verifier
+#### [x] Checkpoint 3.2: Solidity TEE Signature Verifier
 *   **Deliverables:**
     *   Register TEE signer keys inside the `AIGovernedVault` contract.
     *   Modify `executeAIStrategy` to verify the provider's ECDSA signature of the rebalance payload, ensuring it was calculated inside the TEE.
 *   **Developer Execution Notes:**
-    *   *Add verification logic details here.*
+    *   Added `teeSigner` state variable, `TeeSignerUpdated` event, and the owner-only key rotation method `setTeeSigner(address _teeSigner)` to `AIGovernedVault.sol`.
+    *   Integrated cryptography checks into `executeAIStrategy` using OpenZeppelin's `ECDSA` and `MessageHashUtils` to reconstruct the EIP-191 Ethereum signed message hash of `keccak256(abi.encode(allocations, targets, daBlobHash))` and assert it matches the registered `teeSigner`.
+    *   Wrote rigorous Foundry integration and fuzzed test cases in `AIGovernedVault.t.sol` (`testInvalidSignature()`, `testRebalanceAndInterestAccrual()`, `testVault_OwnerActions()`, `testFuzz_RebalanceAllocations()`) to verify signature recovery, reverts on tampered or invalid signatures, and key rotation controls. All tests pass successfully.
 
 ---
 
 ### 📡 Iteration 4: 0G DA Integration & Relayer (Deadline: July 8)
 **Objective:** Disperse payloads to 0G DA, verify KZG commitments, and deploy a live relayer.
 
-#### [ ] Checkpoint 4.1: 0G DA Client Disperser
+#### [x] Checkpoint 4.1: 0G DA Client Disperser
 *   **Deliverables:**
     *   Configure the backend to submit the signed strategy payload to the 0G DA Disperser, retrieving a `blobHash` and KZG proof.
 *   **Developer Execution Notes:**
-    *   *Add DA node endpoints here.*
+    *   Created `ai-agent/da_client.js` with automated proof serialization and dual-mode execution (mocking/simulating storage and live network gRPC dispersion to `https://disperse-testnet.0g.ai`).
 
-#### [ ] Checkpoint 4.2: On-chain DA Proof Verification
+#### [x] Checkpoint 4.2: On-chain DA Proof Verification
 *   **Deliverables:**
     *   Implement verification inside `executeAIStrategy` using the precompiled `DASigners` contract or Galileo's `DA Entrance` contract to assert the blob's availability on-chain.
 *   **Developer Execution Notes:**
-    *   *Add precompile address mapping and results here.*
+    *   Integrated `IDAEntrance` call in `AIGovernedVault.sol` (`executeAIStrategy`). Deployed `MockDAEntrance` at `0x1B62c5222126B63FEC3bc7D2Ab67575AEe9EbaF3` on the Galileo Testnet.
 
-#### [ ] Checkpoint 4.3: Live Relayer Bot Setup
+#### [x] Checkpoint 4.3: Live Relayer Bot Setup
 *   **Deliverables:**
     *   Deploy an autonomous node script (Relayer) that listens for new strategy blobs on the DA network, retrieves the KZG proofs, and calls `executeAIStrategy` on the deployed vault.
 *   **Developer Execution Notes:**
-    *   *Add relayer setup and live transaction logs here.*
+    *   Implemented `ai-agent/relayer.js` driving the end-to-end "Sense-Think-Publish-Execute" pipeline. Successfully deployed contracts on-chain to Galileo (Vault at `0x9cdabBb1c06C37a7eD297f9a320b6B3518388A45`) and verified dual-mode relayer flow.
 
-#### [ ] Checkpoint 4.4: Slippage Protection & Price Oracles
+#### [x] Checkpoint 4.4: Slippage Protection & Price Oracles
 *   **Deliverables:**
     *   Implement oracle price integration (e.g., Pyth or Chainlink) and slippage thresholds within strategy reallocations to protect user assets from front-running and sandwich attacks when moving actual liquidity across real yield pools.
 *   **Developer Execution Notes:**
-    *   *Add price feeds and slippage calculation details here.*
+    *   Deployed `MockPriceOracle` at `0x86c7EEC7d74fDAA3699DcEdF745e022415a68A6C` to retrieve relative prices and validate slippage tolerance constraints inside `reallocateLiquidity` in `AIGovernedVault.sol`. Added full fuzz testing coverage for slippage boundaries.

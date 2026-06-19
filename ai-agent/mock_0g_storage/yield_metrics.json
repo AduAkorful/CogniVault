@@ -1,0 +1,51 @@
+[
+  {
+    "timestamp": "2026-06-18T10:56:09.925Z",
+    "block": 12800540,
+    "lending_apy": 550,
+    "amm_apy": 1200,
+    "risk_limit": 2
+  },
+  {
+    "timestamp": "2026-06-18T15:33:16.092Z",
+    "block": 12800540,
+    "lending_apy": 550,
+    "amm_apy": 1200,
+    "risk_limit": 2
+  },
+  {
+    "timestamp": "2026-06-18T16:35:27.430Z",
+    "block": 12800640,
+    "lending_apy": 550,
+    "amm_apy": 1200,
+    "risk_limit": 2
+  },
+  {
+    "timestamp": "2026-06-18T21:06:45.835Z",
+    "block": 12800740,
+    "lending_apy": 550,
+    "amm_apy": 1200,
+    "risk_limit": 2
+  },
+  {
+    "timestamp": "2026-06-18T21:16:57.288Z",
+    "block": 12800840,
+    "lending_apy": 550,
+    "amm_apy": 1200,
+    "risk_limit": 2
+  },
+  {
+    "timestamp": "2026-06-18T21:17:58.443Z",
+    "block": 12800940,
+    "lending_apy": 550,
+    "amm_apy": 1200,
+    "risk_limit": 2
+  },
+  {
+    "timestamp": "2026-06-18T21:18:59.933Z",
+    "block": 12801040,
+    "lending_apy": 550,
+    "amm_apy": 1200,
+    "risk_limit": 2
+  }
+]

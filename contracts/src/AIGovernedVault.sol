@@ -7,11 +7,23 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {IDAEntrance} from "./interfaces/IDAEntrance.sol";
 
 interface IMockPool {
     function deposit(uint256 amount) external;
     function withdrawAll() external;
     function balanceOf(address user) external view returns (uint256);
+    function asset() external view returns (address);
+}
+
+interface IMockPriceOracle {
+    function latestRoundData(address token) external view returns (
+        uint80 roundId,
+        int256 answer,
+        uint256 startedAt,
+        uint256 updatedAt,
+        uint80 answeredInRound
+    );
 }
 
 contract AIGovernedVault is ERC4626, Ownable {
@@ -23,9 +35,23 @@ contract AIGovernedVault is ERC4626, Ownable {
     mapping(address => bool) public isWhitelistedPool;
     address[] public activePools;
 
+    // 0G DA Verification state
+    address public daEntranceContract;
+    bool public daVerificationEnabled;
+
+    // Slippage Protection & Price Oracle state
+    address public priceOracle;
+    uint256 public maxSlippageBps = 50; // default: 0.5% (50 basis points)
+
     event Rebalanced(address[] targets, uint256[] allocations, bytes32 indexed daBlobHash);
     event PoolWhitelistUpdated(address indexed pool, bool status);
     event TeeSignerUpdated(address indexed teeSigner);
+    event DAVerified(bytes32 indexed daBlobHash, bytes32 indexed dataRoot);
+    event DAEntranceUpdated(address indexed daEntranceContract);
+    event DAVerificationToggled(bool enabled);
+    event PriceOracleUpdated(address indexed priceOracle);
+    event MaxSlippageUpdated(uint256 maxSlippageBps);
+    event SlippageCheckPassed(uint256 expectedValue, uint256 actualValue, uint256 slippageBps);
 
     constructor(IERC20 _asset, address _teeSigner)
         ERC4626(_asset)
@@ -43,6 +69,27 @@ contract AIGovernedVault is ERC4626, Ownable {
     function setTeeSigner(address _teeSigner) external onlyOwner {
         teeSigner = _teeSigner;
         emit TeeSignerUpdated(_teeSigner);
+    }
+
+    function setDAEntrance(address _entrance) external onlyOwner {
+        daEntranceContract = _entrance;
+        emit DAEntranceUpdated(_entrance);
+    }
+
+    function setDAVerification(bool _enabled) external onlyOwner {
+        daVerificationEnabled = _enabled;
+        emit DAVerificationToggled(_enabled);
+    }
+
+    function setPriceOracle(address _oracle) external onlyOwner {
+        priceOracle = _oracle;
+        emit PriceOracleUpdated(_oracle);
+    }
+
+    function setMaxSlippage(uint256 _maxSlippageBps) external onlyOwner {
+        require(_maxSlippageBps <= 500, "Slippage limit too high"); // max 5%
+        maxSlippageBps = _maxSlippageBps;
+        emit MaxSlippageUpdated(_maxSlippageBps);
     }
 
     function getActivePools() external view returns (address[] memory) {
@@ -67,17 +114,44 @@ contract AIGovernedVault is ERC4626, Ownable {
     }
 
     /**
+     * @dev Helper to compute deployed value via oracle prices
+     */
+    function _computeDeployedValue() internal view returns (uint256) {
+        uint256 totalVal = 0;
+        uint256 len = activePools.length;
+        for (uint256 i = 0; i < len; i++) {
+            address pool = activePools[i];
+            uint256 bal = IMockPool(pool).balanceOf(address(this));
+            address token = IMockPool(pool).asset();
+
+            if (priceOracle != address(0)) {
+                (, int256 price, , , ) = IMockPriceOracle(priceOracle).latestRoundData(token);
+                if (price > 0) {
+                    totalVal += (bal * uint256(price)) / 1e8;
+                } else {
+                    totalVal += bal;
+                }
+            } else {
+                totalVal += bal;
+            }
+        }
+        return totalVal;
+    }
+
+    /**
      * @dev Executes an AI-defined asset reallocation strategy.
      * @param allocations The percentage allocations in basis points (sum must equal 10,000).
      * @param targets The target pool addresses.
      * @param signature The TEE signer signature of the strategy payload.
      * @param daBlobHash The 0G DA blob hash containing the raw logs.
+     * @param dataRoot The 0G DA data root to verify.
      */
     function executeAIStrategy(
         uint256[] calldata allocations,
         address[] calldata targets,
         bytes calldata signature,
-        bytes32 daBlobHash
+        bytes32 daBlobHash,
+        bytes32 dataRoot
     ) external {
         uint256 len = targets.length;
         require(len == allocations.length, "Mismatched inputs");
@@ -85,10 +159,19 @@ contract AIGovernedVault is ERC4626, Ownable {
         require(len <= MAX_ACTIVE_POOLS, "Active pool limit exceeded");
 
         // 1. Verify TEE signature
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         address recovered = ethSignedMessageHash.recover(signature);
         require(recovered == teeSigner, "Invalid TEE signature");
+
+        // 1.5. Verify DA root confirmation if enabled
+        if (daVerificationEnabled && daEntranceContract != address(0)) {
+            require(
+                IDAEntrance(daEntranceContract).isDataRootConfirmed(dataRoot),
+                "DA blob not confirmed"
+            );
+            emit DAVerified(daBlobHash, dataRoot);
+        }
 
         // 2. Withdraw all assets from current active pools
         uint256 activeLen = activePools.length;
@@ -121,6 +204,19 @@ contract AIGovernedVault is ERC4626, Ownable {
                 IERC20(asset()).approve(targets[i], amountToDeposit);
                 IMockPool(targets[i]).deposit(amountToDeposit);
                 activePools.push(targets[i]);
+            }
+        }
+
+        // 5. Slippage check
+        if (priceOracle != address(0)) {
+            uint256 expectedValue = totalBalance;
+            uint256 actualValue = _computeDeployedValue();
+            if (actualValue < expectedValue) {
+                uint256 slippage = ((expectedValue - actualValue) * 10000) / expectedValue;
+                require(slippage <= maxSlippageBps, "Slippage exceeds maximum");
+                emit SlippageCheckPassed(expectedValue, actualValue, slippage);
+            } else {
+                emit SlippageCheckPassed(expectedValue, actualValue, 0);
             }
         }
 

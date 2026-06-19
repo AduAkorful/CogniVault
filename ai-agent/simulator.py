@@ -5,12 +5,13 @@ import sys
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from web3 import Web3
+from storage_client import ZeroGStorageClient
 
 # TEE Private Key (for simulation purposes)
 TEE_PRIVATE_KEY = "0x5de4111afa73d9b5c2c6b3e407d36fd5d2f47055c1798317e0892c2cf80ed3d1"
 TEE_ADDRESS = Account.from_key(TEE_PRIVATE_KEY).address
 
-STATE_FILE = "state.json"
+STATE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "state.json")
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -24,13 +25,13 @@ def load_state():
         "pools": {
             "lending": {
                 "name": "Mock Lending Pool",
-                "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+                "address": "0x8a04cd9856c5A9F240C293B9fa65A7D171d8C312",
                 "apy": 550, # 5.5%
                 "risk": 1.2
             },
             "amm": {
                 "name": "Mock AMM Pool",
-                "address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+                "address": "0x3B084b5b2046E7651bb701d1cF729Be7Cb9fAf03",
                 "apy": 1200, # 12.0%
                 "risk": 3.0
             }
@@ -87,19 +88,33 @@ def optimize_portfolio(state):
 
     return alloc_lending_bps, alloc_amm_bps
 
-def sign_strategy(allocations, targets, da_blob_hash):
+def sign_strategy(allocations, targets, da_blob_hash, data_root):
     # Prepare data for ABI encoding
     # allocations: uint256[]
     # targets: address[]
     # da_blob_hash: bytes32
+    # data_root: bytes32
     
-    # Solidity: keccak256(abi.encode(allocations, targets, daBlobHash))
+    # Solidity: keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot))
     # In web3.py: Web3.solidity_keccak or encoding using eth_abi
     from eth_abi import encode
     
+    # Convert string hex to bytes if needed
+    if isinstance(da_blob_hash, str):
+        if da_blob_hash.startswith("0x"):
+            da_blob_hash = bytes.fromhex(da_blob_hash[2:])
+        else:
+            da_blob_hash = bytes.fromhex(da_blob_hash)
+            
+    if isinstance(data_root, str):
+        if data_root.startswith("0x"):
+            data_root = bytes.fromhex(data_root[2:])
+        else:
+            data_root = bytes.fromhex(data_root)
+
     encoded = encode(
-        ['uint256[]', 'address[]', 'bytes32'],
-        [allocations, targets, da_blob_hash]
+        ['uint256[]', 'address[]', 'bytes32', 'bytes32'],
+        [allocations, targets, da_blob_hash, data_root]
     )
     
     message_hash = Web3.keccak(encoded)
@@ -118,41 +133,68 @@ def main():
 
     state = load_state()
     
+    # 0G Storage Integration
+    mock_mode = (os.getenv("MOCK_STORAGE", "false").lower() == "true")
+    indexer_url = os.getenv("INDEXER_URL", "https://indexer-storage-testnet-turbo.0g.ai")
+    
     if len(sys.argv) > 1 and sys.argv[1] == "run":
-        # Read args or perform optimization directly
-        print("[*] Running portfolio optimization...")
-        lending_bps, amm_bps = optimize_portfolio(state)
+        print("[*] Retrieving historical context from 0G Storage...")
+        latest_root = state.get("latest_storage_root")
+        if not latest_root:
+            print("[Warning] No 'latest_storage_root' found in state.json.")
+            latest_root = "0xe1b0defd92d2277d7a8239f648207fca3e731205a925f3dc740449280b9255f3"
+            print(f"[*] Using fallback simulation root hash: {latest_root}")
+            
+        try:
+            client = ZeroGStorageClient(indexer_url=indexer_url, mock_mode=mock_mode)
+            storage_data_bytes = client.download_file(latest_root)
+            historical_data = json.loads(storage_data_bytes.decode('utf-8'))
+            print(f"[✔] Successfully ingested {len(historical_data)} historical yield records from 0G Storage.")
+            print(f"    - Merkle Root Verified: {latest_root}")
+            if historical_data:
+                latest_record = historical_data[-1]
+                print(f"    - Ingested Context: Block #{latest_record['block']} | Lending APY: {latest_record['lending_apy']/100}% | AMM APY: {latest_record['amm_apy']/100}%")
+        except Exception as e:
+            print(f"[Error] Failed to ingest 0G Storage context: {e}")
+            if not mock_mode:
+                print("[!] Production safety violation: Exiting process due to 0G Storage download/verification failure.")
+                sys.exit(1)
+            print("[*] Proceeding with offline fallback simulator state.")
+
+        print("\n[*] Running portfolio optimization via 0G Compute...")
+        import subprocess
         
+        # Determine path to compute_client.js in the same directory as simulator.py
+        js_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "compute_client.js")
+        
+        result = subprocess.run(["node", js_path], capture_output=True, text=True)
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+            
+        if result.returncode != 0:
+            print("[Error] 0G Compute client execution failed.")
+            sys.exit(1)
+
+        # Reload state after JS updates it
+        state = load_state()
+        if not state.get("history"):
+            print("[Error] No execution history found in state.json after running Compute client.")
+            sys.exit(1)
+            
+        latest_record = state["history"][-1]
+        lending_bps, amm_bps = latest_record["allocations"]
         lending_addr = state["pools"]["lending"]["address"]
         amm_addr = state["pools"]["amm"]["address"]
+        da_blob_hash = latest_record["da_blob_hash"]
+        signature = latest_record["signature"]
         
-        allocations = [lending_bps, amm_bps]
-        targets = [lending_addr, amm_addr]
-        
-        # Simulated 0G DA Blob Hash
-        da_blob_hash_bytes = Web3.keccak(text=f"da-blob-payload-{len(state['history'])}")
-        da_blob_hash = da_blob_hash_bytes.hex()
-        
-        msg_hash, signature = sign_strategy(allocations, targets, da_blob_hash_bytes)
-        
-        print("\n[✔] Optimization complete:")
+        print("\n[✔] 0G Compute optimization execution complete:")
         print(f"  - Lending Allocation: {lending_bps / 100:.2f}% ({lending_bps} bps) -> Pool: {lending_addr}")
         print(f"  - AMM Allocation: {amm_bps / 100:.2f}% ({amm_bps} bps) -> Pool: {amm_addr}")
         print(f"  - Calculated Risk Score: {lending_bps/10000 * state['pools']['lending']['risk'] + amm_bps/10000 * state['pools']['amm']['risk']:.2f}")
-        print(f"  - 0G DA Blob Hash: {da_blob_hash}")
-        print(f"  - TEE Signature: {signature[:32]}...{signature[-32:]}")
-        
-        # Save run history
-        run_record = {
-            "timestamp": len(state["history"]),
-            "allocations": allocations,
-            "targets": targets,
-            "da_blob_hash": da_blob_hash,
-            "signature": signature,
-            "message_hash": msg_hash
-        }
-        state["history"].append(run_record)
-        save_state(state)
+        print(f"  - 0G DA Blob Hash: 0x{da_blob_hash}")
+        print(f"  - TEE Signature: 0x{signature[:32]}...{signature[-32:]}")
         print("\n[✔] Optimization results saved to state.json")
     else:
         print("[i] Available commands:")
