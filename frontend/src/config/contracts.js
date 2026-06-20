@@ -52,14 +52,5 @@ export const PRICE_ORACLE_ABI = [
   "function setPrice(address, int256) external"
 ];
 
-export const DEFAULT_ADDRESSES = {
-  vault: '0x9cdabBb1c06C37a7eD297f9a320b6B3518388A45',
-  usdc: '0x7cC78662e248FdF3F2B829DAa8858c8B0523340A',
-  lendingPool: '0x8a04cd9856c5A9F240C293B9fa65A7D171d8C312',
-  ammPool: '0x3B084b5b2046E7651bb701d1cF729Be7Cb9fAf03',
-  priceOracle: '0x86c7EEC7d74fDAA3699DcEdF745e022415a68A6C',
-  daEntrance: '0x1B62c5222126B63FEC3bc7D2Ab67575AEe9EbaF3'
-};
-
 export const GALILEO_CHAIN_ID = 16602;
 export const GALILEO_RPC = 'https://evmrpc-testnet.0g.ai';

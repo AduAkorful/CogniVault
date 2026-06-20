@@ -3,12 +3,14 @@ pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
 import {AIGovernedVault} from "../src/AIGovernedVault.sol";
-import {MockUSDC} from "../src/MockUSDC.sol";
-import {MockLendingPool} from "../src/MockLendingPool.sol";
-import {MockAMMPool} from "../src/MockAMMPool.sol";
-import {MockW0G} from "../src/MockW0G.sol";
-import {MockDAEntrance} from "./mocks/MockDAEntrance.sol";
-import {MockPriceOracle} from "../src/MockPriceOracle.sol";
+import {USDC} from "../src/USDC.sol";
+import {LendingPool} from "../src/LendingPool.sol";
+import {AMMPool} from "../src/AMMPool.sol";
+import {W0G} from "../src/W0G.sol";
+import {TestDAEntrance} from "./mocks/TestDAEntrance.sol";
+import {PriceOracle} from "../src/PriceOracle.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
@@ -16,11 +18,11 @@ contract AIGovernedVaultTest is Test {
     using ECDSA for bytes32;
 
     AIGovernedVault public vault;
-    MockUSDC public usdc;
-    MockLendingPool public lendingPool;
-    MockAMMPool public ammPool;
-    MockDAEntrance public mockDAEntrance;
-    MockPriceOracle public oracle;
+    USDC public usdc;
+    LendingPool public lendingPool;
+    AMMPool public ammPool;
+    TestDAEntrance public testDAEntrance;
+    PriceOracle public oracle;
 
     address public owner = address(1);
     address public user = address(2);
@@ -34,20 +36,25 @@ contract AIGovernedVaultTest is Test {
 
         vm.startPrank(owner);
         // 1. Deploy Assets (USDC)
-        usdc = new MockUSDC();
+        usdc = new USDC();
 
-        // 2. Deploy Mock Pools (with initial APYs: Lending 5.50%, AMM 12.00%)
-        lendingPool = new MockLendingPool(address(usdc), 550);
-        ammPool = new MockAMMPool(address(usdc), 1200);
+        // 2. Deploy Pools (with initial APYs: Lending 5.50%, AMM 12.00%)
+        lendingPool = new LendingPool(address(usdc), 550);
+        ammPool = new AMMPool(address(usdc), 1200);
 
-        // 2.5 Deploy Mock DA Entrance
-        mockDAEntrance = new MockDAEntrance();
+        // 2.5 Deploy DA Entrance
+        testDAEntrance = new TestDAEntrance();
 
-        // 3. Deploy Vault (takes IERC20 asset and TEE signer)
-        vault = new AIGovernedVault(usdc, teeSigner);
+        // 3. Deploy Vault as UUPS upgradeable proxy
+        AIGovernedVault impl = new AIGovernedVault();
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(impl.initialize, (IERC20(address(usdc)), teeSigner))
+        );
+        vault = AIGovernedVault(address(proxy));
 
         // 3.5 Deploy and configure Oracle
-        oracle = new MockPriceOracle();
+        oracle = new PriceOracle();
         oracle.setPrice(address(usdc), 1e8);
         vault.setPriceOracle(address(oracle));
 
@@ -224,13 +231,13 @@ contract AIGovernedVaultTest is Test {
     }
 
     // New tests to reach 100% coverage
-    function testMockW0G_Basic() public {
-        // Deploy MockW0G
+    function testW0G_Basic() public {
+        // Deploy W0G
         vm.prank(owner);
-        MockW0G w0g = new MockW0G();
+        W0G w0g = new W0G();
         
-        assertEq(w0g.name(), "Mock Wrapped 0G");
-        assertEq(w0g.symbol(), "mW0G");
+        assertEq(w0g.name(), "Wrapped 0G");
+        assertEq(w0g.symbol(), "W0G");
         assertEq(w0g.decimals(), 18);
         assertEq(w0g.balanceOf(owner), 1_000_000 * 10**18);
         
@@ -245,7 +252,7 @@ contract AIGovernedVaultTest is Test {
 
         // Expect reverts
         vm.prank(address(0x456));
-        vm.expectRevert("MockW0G: caller is not minter or owner");
+        vm.expectRevert("W0G: caller is not minter or owner");
         w0g.mint(address(0x456), 100);
 
         vm.prank(address(0x456));
@@ -253,9 +260,9 @@ contract AIGovernedVaultTest is Test {
         w0g.setMinter(address(0x456), true);
     }
 
-    function testMockUSDC_Reverts() public {
+    function testUSDC_Reverts() public {
         vm.prank(user);
-        vm.expectRevert("MockUSDC: caller is not minter or owner");
+        vm.expectRevert("USDC: caller is not minter or owner");
         usdc.mint(user, 100);
         
         vm.prank(user);
@@ -292,11 +299,11 @@ contract AIGovernedVaultTest is Test {
         assertEq(lendingPool.getPendingYield(user), 0);
     }
 
-    function testMockPools_Full() public {
+    function testPools_Full() public {
         // We will test both lendingPool and ammPool to ensure 100% coverage
         for (uint256 idx = 0; idx < 2; idx++) {
             if (idx == 0) {
-                MockLendingPool pool = lendingPool;
+                LendingPool pool = lendingPool;
                 
                 // setAPY
                 vm.prank(owner);
@@ -348,7 +355,7 @@ contract AIGovernedVaultTest is Test {
                 pool.withdrawAll();
                 assertEq(pool.balanceOf(owner), 0);
             } else {
-                MockAMMPool pool = ammPool;
+                AMMPool pool = ammPool;
                 
                 // setAPY
                 vm.prank(owner);
@@ -595,7 +602,7 @@ contract AIGovernedVaultTest is Test {
     function testDAVerification() public {
         // Setup owner prank to configure DA
         vm.startPrank(owner);
-        vault.setDAEntrance(address(mockDAEntrance));
+        vault.setDAEntrance(address(testDAEntrance));
         vault.setDAVerification(true);
         vm.stopPrank();
 
@@ -611,26 +618,26 @@ contract AIGovernedVaultTest is Test {
         targets[1] = address(ammPool);
 
         bytes32 daBlobHash = keccak256("da-blob-verification");
-        bytes32 mockRoot = keccak256("data-root-confirmed");
+        bytes32 testRoot = keccak256("data-root-confirmed");
 
         // 1. Set root confirmation status to false in mock
-        mockDAEntrance.setConfirmed(mockRoot, false);
+        testDAEntrance.setConfirmed(testRoot, false);
 
         // Sign with correct TEE key but with dataRoot
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, mockRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, testRoot));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
         // Rebalance should fail because data root is not confirmed
         vm.expectRevert("DA blob not confirmed");
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, mockRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot);
 
         // 2. Set root confirmation status to true in mock
-        mockDAEntrance.setConfirmed(mockRoot, true);
+        testDAEntrance.setConfirmed(testRoot, true);
 
         // Should now succeed
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, mockRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot);
         assertEq(lendingPool.balanceOf(address(vault)), 5_000 * 10**6);
         assertEq(ammPool.balanceOf(address(vault)), 5_000 * 10**6);
     }
@@ -653,15 +660,15 @@ contract AIGovernedVaultTest is Test {
         targets[1] = address(ammPool);
 
         bytes32 daBlobHash = keccak256("da-blob-slippage-ok");
-        bytes32 mockRoot = bytes32(0);
+        bytes32 testRoot = bytes32(0);
 
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, mockRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, testRoot));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
         // Should succeed
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, mockRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot);
     }
 
     function testSlippage_ExceedsThreshold() public {
@@ -682,16 +689,16 @@ contract AIGovernedVaultTest is Test {
         targets[1] = address(ammPool);
 
         bytes32 daBlobHash = keccak256("da-blob-slippage-fail");
-        bytes32 mockRoot = bytes32(0);
+        bytes32 testRoot = bytes32(0);
 
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, mockRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, testRoot));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
         // Should revert because slippage exceeds maximum
         vm.expectRevert("Slippage exceeds maximum");
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, mockRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot);
     }
 
     function testSlippage_OwnerControls() public {
@@ -706,5 +713,38 @@ contract AIGovernedVaultTest is Test {
         vault.setPriceOracle(address(0));
         assertEq(vault.priceOracle(), address(0));
         vm.stopPrank();
+    }
+
+    function testUpgrade_PreservesState() public {
+        // Deposit and rebalance to create state
+        uint256 depositAmount = 10_000 * 10**6;
+        vm.prank(user);
+        vault.deposit(depositAmount, user);
+
+        assertEq(vault.balanceOf(user), depositAmount * 10**12);
+        assertEq(vault.totalAssets(), depositAmount);
+
+        // Deploy new implementation and upgrade
+        AIGovernedVault newImpl = new AIGovernedVault();
+        vm.prank(owner);
+        vault.upgradeToAndCall(address(newImpl), "");
+
+        // Verify state preserved after upgrade
+        assertEq(vault.balanceOf(user), depositAmount * 10**12);
+        assertEq(vault.totalAssets(), depositAmount);
+        assertEq(vault.teeSigner(), teeSigner);
+        assertEq(vault.owner(), owner);
+    }
+
+    function testUpgrade_RevertIfNotOwner() public {
+        AIGovernedVault newImpl = new AIGovernedVault();
+        vm.prank(user);
+        vm.expectRevert();
+        vault.upgradeToAndCall(address(newImpl), "");
+    }
+
+    function testReinitialize_Reverts() public {
+        vm.expectRevert();
+        vault.initialize(IERC20(address(usdc)), teeSigner);
     }
 }

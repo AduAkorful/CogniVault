@@ -40,11 +40,17 @@ createAppKit({
   networks: [zeroGGalileo],
   metadata,
   projectId: REOWN_PROJECT_ID,
+  defaultNetwork: zeroGGalileo,
   features: {
     analytics: false,
     email: false,
-    socials: []
+    socials: [],
+    swaps: false,
+    onramp: false
   },
+  enableNetworkSwitch: false,
+  enableReconnect: true,
+  allowUnsupportedChain: true,
   themeMode: 'dark',
   themeVariables: {
     '--w3m-color-mix': '#00f2fe',

@@ -9,6 +9,7 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const STATE_FILE = path.join(__dirname, '..', 'state.json');
+const DEPLOYMENTS_FILE = path.join(__dirname, '..', 'deployments.json');
 
 const PORT = parseInt(process.env.API_PORT || '3100', 10);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
@@ -38,13 +39,45 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.url === '/health' && req.method === 'GET') {
+    const stateExists = fs.existsSync(STATE_FILE);
+    let stateInfo = {};
+    try {
+      if (stateExists) {
+        const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+        stateInfo = {
+          history_count: state.history?.length || 0,
+          aum_snapshots: state.aum_history?.length || 0,
+          logs_count: state.logs?.length || 0,
+          has_storage_root: !!state.latest_storage_root
+        };
+      }
+    } catch { /* ignore */ }
+
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', timestamp: Date.now() }));
+    res.end(JSON.stringify({
+      status: 'ok',
+      timestamp: Date.now(),
+      uptime: process.uptime(),
+      state_exists: stateExists,
+      ...stateInfo
+    }));
+    return;
+  }
+
+  if (req.url === '/deployments.json' && req.method === 'GET') {
+    try {
+      const data = fs.readFileSync(DEPLOYMENTS_FILE, 'utf8');
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+      res.end(data);
+    } catch (err) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'deployments.json not found' }));
+    }
     return;
   }
 
   res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ error: 'Not found', endpoints: ['/state.json', '/health'] }));
+  res.end(JSON.stringify({ error: 'Not found', endpoints: ['/state.json', '/deployments.json', '/health'] }));
 });
 
 server.listen(PORT, () => {

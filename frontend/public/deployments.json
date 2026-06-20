@@ -1,0 +1,21 @@
+{
+  "network": "0G-Galileo-Testnet",
+  "chainId": 16602,
+  "rpcUrl": "https://evmrpc-testnet.0g.ai",
+  "blockExplorer": "https://chainscan-galileo.0g.ai",
+  "contracts": {
+    "vault":       { "proxy": "0xB8F875852d6651A26d0920b33A7A71724541bBD0", "implementation": "0x108C3E04E8c8638624f3ADC97443711a22B7E630" },
+    "usdc":        { "address": "0xdd26620265c7d2637cF08bc3b9FB7D92Fcd594F6" },
+    "w0g":         { "address": "" },
+    "lendingPool": { "address": "0x2969d1b707baF19D57949d68e9D8b8eD6cb257F8" },
+    "ammPool":     { "address": "0x8eDf650c14A9fEc51FF8208B919F2E7e32827fF8" },
+    "priceOracle": { "address": "0x0ecDB6A741A75e961435F024fD518eA26B6ACd2B" },
+    "daEntrance":  { "address": "0x857C0A28A8634614BB2C96039Cf4a20AFF709Aa9" }
+  },
+  "teeSigner": "0x78D1d675952c2d202D2d899ba3C1498C44cd3971",
+  "teePrivateKey": "0xeee1b5f3e6aa5509101946409e99a646e27040de89498f541434481645624140",
+  "pools": {
+    "lending": { "name": "Lending Pool", "risk": 1.2 },
+    "amm":     { "name": "AMM Pool", "risk": 3.0 }
+  }
+}

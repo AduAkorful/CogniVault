@@ -9,7 +9,7 @@
     "compute": "node compute_client.js",
     "da": "node da_client.js",
     "relayer": "node relayer.js",
-    "relayer:mock": "MOCK_RELAYER=true MOCK_COMPUTE=true MOCK_STORAGE=true MOCK_DA=true node relayer.js",
+    "market": "node market_simulator.js",
     "api": "node api_server.js",
     "serve": "node api_server.js"
   },

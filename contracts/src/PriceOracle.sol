@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract MockPriceOracle is Ownable {
+contract PriceOracle is Ownable {
     struct PriceFeed {
         uint80 roundId;
         int256 answer;       // price in 8-decimal USD (e.g., 1e8 = $1.00)
@@ -19,7 +19,6 @@ contract MockPriceOracle is Ownable {
 
     constructor() Ownable(msg.sender) {}
 
-    /// @dev Owner sets/updates the price for a token (e.g., USDC, W0G)
     function setPrice(address token, int256 price) external onlyOwner {
         latestRoundId++;
         feeds[token] = PriceFeed({
@@ -32,7 +31,6 @@ contract MockPriceOracle is Ownable {
         emit PriceUpdated(token, price, block.timestamp);
     }
 
-    /// @dev Returns the latest price data (Chainlink-compatible)
     function latestRoundData(address token) external view returns (
         uint80 roundId,
         int256 answer,

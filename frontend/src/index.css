@@ -413,6 +413,20 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; letter-spacing
 .connect-prompt-inner svg { color: var(--c-primary); }
 .connect-prompt-inner p { font-size: 0.9rem; color: var(--t-secondary); }
 
+/* Loading screen */
+.loading-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  color: var(--t-secondary);
+}
+
+.loading-screen .spin { color: var(--c-primary); }
+.loading-screen p { font-size: 0.9rem; }
+
 /* Cards */
 .card {
   background: var(--bg-card);

@@ -5,27 +5,23 @@ import {
 } from 'recharts';
 import {
   Wallet, Lock, TrendingUp, Database, Cpu, Shield, ArrowRightLeft,
-  RefreshCw, Coins, Activity, Zap, CheckCircle2,
-  Sparkles, ArrowDownRight, Settings
+  RefreshCw, Coins, Activity, Zap, CheckCircle2, ArrowDownRight, Loader2
 } from 'lucide-react';
 import {
   useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect
 } from '@reown/appkit/react';
 import {
-  POOL_ABI, DEFAULT_ADDRESSES,
-  GALILEO_CHAIN_ID, GALILEO_RPC
+  POOL_ABI, GALILEO_CHAIN_ID, GALILEO_RPC
 } from './config/contracts';
 import { useVault } from './hooks/useVault';
 
 const STATE_JSON_URL = import.meta.env.VITE_PIPELINE_API_URL
   ? `${import.meta.env.VITE_PIPELINE_API_URL}/state.json`
   : '/state.json';
+const DEPLOYMENTS_URL = import.meta.env.VITE_PIPELINE_API_URL
+  ? `${import.meta.env.VITE_PIPELINE_API_URL}/deployments.json`
+  : '/deployments.json';
 const SYNC_INTERVAL = 15000;
-
-const POOL_META = {
-  [DEFAULT_ADDRESSES.lendingPool.toLowerCase()]: { name: 'Lending Pool', risk: 1.2, color: '#00f2fe' },
-  [DEFAULT_ADDRESSES.ammPool.toLowerCase()]: { name: 'AMM Pool', risk: 3.0, color: '#a855f7' }
-};
 
 function App() {
   // Reown AppKit hooks
@@ -33,6 +29,10 @@ function App() {
   const { address, isConnected } = useAppKitAccount();
   const { walletProvider } = useAppKitProvider('eip155');
   const { disconnect } = useDisconnect();
+
+  // Deployments (loaded from deployments.json)
+  const [deployments, setDeployments] = useState(null);
+  const [deploymentsLoading, setDeploymentsLoading] = useState(true);
 
   // Protocol state (read-only, always visible)
   const [readOnlyProvider] = useState(
@@ -50,24 +50,14 @@ function App() {
 
   // User state (only when connected)
   const [userPosition, setUserPosition] = useState(null);
-  const [isOwner, setIsOwner] = useState(false);
 
   // Pipeline
   const [pipelineState, setPipelineState] = useState(null);
-  const [chartData, setChartData] = useState([]);
 
   // Actions
   const [depositAmount, setDepositAmount] = useState('');
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [txPending, setTxPending] = useState(false);
-
-  // Market sim
-  const [lendingApyInput, setLendingApyInput] = useState(550);
-  const [ammApyInput, setAmmApyInput] = useState(1200);
-  const [marketShiftPending, setMarketShiftPending] = useState(false);
-  const [rebalancePending, setRebalancePending] = useState(false);
-  const [lastRebalanceTx, setLastRebalanceTx] = useState('');
-  const [showMarketPanel, setShowMarketPanel] = useState(false);
 
   // Logs
   const [logs, setLogs] = useState([]);
@@ -75,9 +65,15 @@ function App() {
   const syncingRef = useRef(false);
   const configFetchedRef = useRef(false);
 
-  const { deposit, redeem, executeAIStrategy, setPoolAPY,
+  // Derive addresses from deployments
+  const vaultAddr = deployments?.contracts?.vault?.proxy || '';
+  const usdcAddr = deployments?.contracts?.usdc?.address || '';
+  const lendingPoolAddr = deployments?.contracts?.lendingPool?.address || '';
+  const ammPoolAddr = deployments?.contracts?.ammPool?.address || '';
+
+  const { deposit, redeem,
     getVaultConfig, getVaultMetrics, getUserPosition } = useVault(
-    DEFAULT_ADDRESSES.vault, DEFAULT_ADDRESSES.usdc, walletProvider, readOnlyProvider
+    vaultAddr, usdcAddr, walletProvider, readOnlyProvider
   );
 
   const addLog = useCallback((type, text) => {
@@ -85,9 +81,28 @@ function App() {
     setLogs(prev => [...prev.slice(-80), { id, type, text, time: new Date().toLocaleTimeString() }]);
   }, []);
 
+  // Fetch deployments.json
+  const fetchDeployments = useCallback(async () => {
+    try {
+      const res = await fetch(DEPLOYMENTS_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setDeployments(data);
+    } catch (err) {
+      console.error('Failed to load deployments.json:', err);
+      addLog('error', 'Failed to load contract addresses. Ensure deployments.json exists.');
+    } finally {
+      setDeploymentsLoading(false);
+    }
+  }, [addLog]);
+
+  useEffect(() => {
+    Promise.resolve().then(() => fetchDeployments());
+  }, [fetchDeployments]);
+
   // Protocol sync (always runs — read-only)
   const syncProtocol = useCallback(async () => {
-    if (syncingRef.current) return;
+    if (syncingRef.current || !vaultAddr || !usdcAddr) return;
     syncingRef.current = true;
     try {
       const blockNum = await readOnlyProvider.getBlockNumber();
@@ -104,9 +119,6 @@ function App() {
         const config = await getVaultConfig();
         if (config) {
           setVaultConfig(config);
-          if (address && config.owner) {
-            setIsOwner(config.owner.toLowerCase() === address.toLowerCase());
-          }
           configFetchedRef.current = true;
         }
       }
@@ -116,23 +128,20 @@ function App() {
       let weightedApy = 0;
       const totalDeployed = metrics ? metrics.totalAssets - metrics.idleBalance : 0;
 
-      for (const addr of [DEFAULT_ADDRESSES.lendingPool, DEFAULT_ADDRESSES.ammPool]) {
+      for (const [addr, meta] of [[lendingPoolAddr, { name: 'Lending Pool', risk: 1.2, color: '#00f2fe' }], [ammPoolAddr, { name: 'AMM Pool', risk: 3.0, color: '#a855f7' }]]) {
+        if (!addr) continue;
         try {
           const poolContract = new ethers.Contract(addr, POOL_ABI, readOnlyProvider);
           const [bal, apy, pendingYield] = await Promise.all([
-            poolContract.balanceOf(DEFAULT_ADDRESSES.vault),
+            poolContract.balanceOf(vaultAddr),
             poolContract.getAPY(),
-            poolContract.getPendingYield(DEFAULT_ADDRESSES.vault)
+            poolContract.getPendingYield(vaultAddr)
           ]);
           const balance = Number(ethers.formatUnits(bal, 6));
           const apyNum = Number(apy);
           const pending = Number(ethers.formatUnits(pendingYield, 6));
           if (totalDeployed > 0) weightedApy += (balance / totalDeployed) * apyNum;
-          const meta = POOL_META[addr.toLowerCase()];
-          pools.push({
-            address: addr, name: meta?.name || 'Pool', risk: meta?.risk || 0,
-            color: meta?.color || '#64748b', balance, apy: apyNum, pendingYield: pending
-          });
+          pools.push({ address: addr, ...meta, balance, apy: apyNum, pendingYield: pending });
         } catch {
           // skip
         }
@@ -140,7 +149,7 @@ function App() {
       setPoolDetails(pools);
       setNetAPY(weightedApy / 100);
 
-      // User position (only when connected)
+      // User position
       if (address) {
         const pos = await getUserPosition(address);
         if (pos) setUserPosition(pos);
@@ -152,14 +161,15 @@ function App() {
     } finally {
       syncingRef.current = false;
     }
-  }, [readOnlyProvider, address, getVaultConfig, getVaultMetrics, getUserPosition]);
+  }, [readOnlyProvider, vaultAddr, usdcAddr, lendingPoolAddr, ammPoolAddr, address, getVaultConfig, getVaultMetrics, getUserPosition]);
 
   // Poll protocol data
   useEffect(() => {
+    if (!deployments) return;
     Promise.resolve().then(() => syncProtocol());
     const interval = setInterval(syncProtocol, SYNC_INTERVAL);
     return () => clearInterval(interval);
-  }, [syncProtocol]);
+  }, [deployments, syncProtocol]);
 
   // When wallet connects, reset config cache and re-sync
   useEffect(() => {
@@ -169,31 +179,37 @@ function App() {
       Promise.resolve().then(() => syncProtocol());
     }
     if (!isConnected) {
-      Promise.resolve().then(() => {
-        setUserPosition(null);
-        setIsOwner(false);
-      });
+      Promise.resolve().then(() => setUserPosition(null));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, address]);
 
   // Pipeline fetch
+  const [pipelineLogs, setPipelineLogs] = useState([]);
+  const [aumHistory, setAumHistory] = useState([]);
+
   const fetchPipelineState = useCallback(async () => {
     try {
       const res = await fetch(STATE_JSON_URL);
       if (!res.ok) return;
       const data = await res.json();
       setPipelineState(data);
-      if (data.history?.length > 0) {
-        setChartData(data.history.map((h, i) => ({
-          run: i + 1, label: `#${i + 1}`,
-          lending: parseFloat(h.allocations[0] ? (h.allocations[0] / 100).toFixed(2) : 0),
-          amm: parseFloat(h.allocations[1] ? (h.allocations[1] / 100).toFixed(2) : 0),
+
+      if (data.logs) {
+        setPipelineLogs(data.logs.slice(-50));
+      }
+
+      if (data.aum_history && data.aum_history.length > 0) {
+        setAumHistory(data.aum_history.map((h, i) => ({
+          idx: i + 1,
+          label: `#${i + 1}`,
+          aum: h.aum,
+          block: h.block,
+          time: h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : ''
         })));
-        if (data.pools) {
-          setLendingApyInput(data.pools.lending?.apy || 550);
-          setAmmApyInput(data.pools.amm?.apy || 1200);
-        }
+      }
+
+      if (data.history?.length > 0) {
+        // Strategy history available in pipelineState for the pipeline panel
       }
     } catch {
       // silent
@@ -202,7 +218,7 @@ function App() {
 
   useEffect(() => {
     Promise.resolve().then(() => fetchPipelineState());
-    const interval = setInterval(fetchPipelineState, 30000);
+    const interval = setInterval(fetchPipelineState, 15000);
     return () => clearInterval(interval);
   }, [fetchPipelineState]);
 
@@ -227,37 +243,6 @@ function App() {
     } catch { /* logged */ } finally { setTxPending(false); }
   };
 
-  const handleMarketShift = async () => {
-    if (!isOwner) return;
-    setMarketShiftPending(true);
-    try {
-      addLog('system', 'Simulating market movement...');
-      await setPoolAPY(DEFAULT_ADDRESSES.lendingPool, lendingApyInput, addLog);
-      await setPoolAPY(DEFAULT_ADDRESSES.ammPool, ammApyInput, addLog);
-      addLog('system', 'Market updated. AI agent will detect and rebalance.');
-      syncProtocol();
-    } catch { /* logged */ } finally { setMarketShiftPending(false); }
-  };
-
-  const handleTriggerRebalance = async () => {
-    if (!pipelineState?.history?.length) {
-      addLog('error', 'No signed strategy available.');
-      return;
-    }
-    setRebalancePending(true);
-    try {
-      const latest = pipelineState.history[pipelineState.history.length - 1];
-      const blobHash = `0x${latest.da_blob_hash}`;
-      const dataRoot = latest.da_data_root ? `0x${latest.da_data_root}` : ethers.ZeroHash;
-      addLog('system', 'Triggering rebalance from latest AI strategy...');
-      const tx = await executeAIStrategy(
-        latest.allocations, latest.targets,
-        `0x${latest.signature}`, blobHash, dataRoot, addLog, syncProtocol
-      );
-      if (tx) { setLastRebalanceTx(tx.hash); addLog('system', 'Rebalance confirmed.'); }
-    } catch { /* logged */ } finally { setRebalancePending(false); }
-  };
-
   // Helpers
   const fmt = (n, d = 2) => (n != null && !isNaN(n)) ? n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : '0.00';
   const fmtAddr = (addr) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : 'N/A';
@@ -272,12 +257,56 @@ function App() {
     : [];
 
   const latestRun = pipelineState?.history?.[pipelineState.history.length - 1];
+  const hasActivePools = (vaultConfig?.activePools?.length || 0) > 0;
+  const daVerified = vaultConfig?.daVerificationEnabled;
+  const pipelineLogsCount = pipelineState?.logs?.length || 0;
+  const aumSnapshots = pipelineState?.aum_history?.length || 0;
+  const hasPipelineData = !!(pipelineState?.latest_storage_root || pipelineState?.history?.length || pipelineState?.da_blob_hash);
+
   const pipelineSteps = [
-    { label: '0G Storage', icon: Database, active: !!pipelineState?.latest_storage_root, detail: pipelineState?.latest_storage_root ? fmtAddr(pipelineState.latest_storage_root) : 'Waiting' },
-    { label: '0G Compute', icon: Cpu, active: !!pipelineState?.history?.length, detail: pipelineState?.history?.length ? `${pipelineState.history.length} runs` : 'Idle' },
-    { label: '0G DA', icon: Shield, active: !!pipelineState?.da_blob_hash, detail: pipelineState?.da_blob_hash ? fmtAddr(pipelineState.da_blob_hash) : 'Idle' },
-    { label: '0G Chain', icon: ArrowRightLeft, active: !!lastRebalanceTx, detail: lastRebalanceTx ? fmtAddr(lastRebalanceTx) : 'Idle' }
+    {
+      label: '0G Storage',
+      icon: Database,
+      active: !!pipelineState?.latest_storage_root,
+      detail: pipelineState?.latest_storage_root
+        ? `Root: ${fmtAddr(pipelineState.latest_storage_root)}`
+        : hasPipelineData ? 'Monitoring' : 'Awaiting first deposit'
+    },
+    {
+      label: '0G Compute',
+      icon: Cpu,
+      active: !!pipelineState?.history?.length,
+      detail: pipelineState?.history?.length
+        ? `${pipelineState.history.length} TEE runs`
+        : hasPipelineData ? 'Ready' : 'Awaiting first deposit'
+    },
+    {
+      label: '0G DA',
+      icon: Shield,
+      active: !!pipelineState?.da_blob_hash,
+      detail: pipelineState?.da_blob_hash
+        ? `Blob: ${fmtAddr(pipelineState.da_blob_hash)}`
+        : daVerified ? 'Verified — awaiting blob' : 'DA verification OFF'
+    },
+    {
+      label: '0G Chain',
+      icon: ArrowRightLeft,
+      active: hasActivePools,
+      detail: hasActivePools
+        ? `${vaultConfig?.activePools?.length} pools active`
+        : vaultAUM > 0 ? 'AUM detected — pending rebalance' : 'Awaiting first deposit'
+    }
   ];
+
+  // Loading state while deployments.json loads
+  if (deploymentsLoading) {
+    return (
+      <div className="loading-screen">
+        <Loader2 size={32} className="spin" />
+        <p>Loading CogniVault...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -291,9 +320,6 @@ function App() {
           <span className="header-net"><span className="net-dot" /> Galileo Live</span>
         </div>
         <div className="app-header-right">
-          <button className="header-btn" onClick={() => setShowMarketPanel(!showMarketPanel)}>
-            <Settings size={15} /> Market Sim
-          </button>
           {isConnected ? (
             <button className="header-wallet" onClick={() => disconnect()}>
               <Wallet size={15} /> {fmtAddr(address)}
@@ -466,36 +492,40 @@ function App() {
 
           <div className="card">
             <div className="card-header">
-              <h3><TrendingUp size={18} /> Performance</h3>
-              <span className="badge-live">{chartData.length} runs</span>
+              <h3><TrendingUp size={18} /> Protocol Growth</h3>
+              <span className="badge-live">{aumHistory.length} snapshots</span>
             </div>
-            {chartData.length > 0 ? (
+            {aumHistory.length > 0 ? (
               <div className="chart-wrap">
                 <ResponsiveContainer>
-                  <AreaChart data={chartData} margin={{ top: 10, right: 5, left: -20, bottom: 0 }}>
+                  <AreaChart data={aumHistory} margin={{ top: 10, right: 5, left: -10, bottom: 0 }}>
                     <defs>
-                      <linearGradient id="gradLending" x1="0" y1="0" x2="0" y2="1">
+                      <linearGradient id="gradAUM" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#00f2fe" stopOpacity={0.3} />
                         <stop offset="100%" stopColor="#00f2fe" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="gradAmm" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#a855f7" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="#a855f7" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                     <XAxis dataKey="label" stroke="#64748b" fontSize={11} tickLine={false} />
-                    <YAxis stroke="#64748b" fontSize={11} tickLine={false} unit="%" />
-                    <Tooltip contentStyle={{ background: '#0d121f', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', fontSize: '0.8rem' }} labelStyle={{ color: '#94a3b8' }} />
-                    <Area type="monotone" dataKey="lending" name="Lending %" stroke="#00f2fe" strokeWidth={2} fill="url(#gradLending)" />
-                    <Area type="monotone" dataKey="amm" name="AMM %" stroke="#a855f7" strokeWidth={2} fill="url(#gradAmm)" />
+                    <YAxis stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={v => `$${v}`} />
+                    <Tooltip contentStyle={{ background: '#0d121f', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', fontSize: '0.8rem' }} labelStyle={{ color: '#94a3b8' }} formatter={v => [`$${Number(v).toFixed(2)}`, 'AUM']} />
+                    <Area type="monotone" dataKey="aum" name="Vault AUM" stroke="#00f2fe" strokeWidth={2} fill="url(#gradAUM)" />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
             ) : (
               <div className="chart-empty">
                 <Activity size={28} />
-                <p>No pipeline history yet</p>
+                <p>Vault growth chart will appear after first deposit</p>
+              </div>
+            )}
+            {aumHistory.length > 1 && (
+              <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', color: 'var(--t-secondary)' }}>
+                <span>Boot: ${fmt(aumHistory[0]?.aum, 2)}</span>
+                <span>Current: ${fmt(aumHistory[aumHistory.length - 1]?.aum, 2)}</span>
+                <span style={{ color: 'var(--c-success)' }}>
+                  Growth: +{fmt(((aumHistory[aumHistory.length - 1]?.aum - aumHistory[0]?.aum) / Math.max(aumHistory[0]?.aum, 1)) * 100, 2)}%
+                </span>
               </div>
             )}
           </div>
@@ -510,7 +540,13 @@ function App() {
             </div>
             <div className="terminal">
               <div className="terminal-body">
-                {logs.length === 0 && <div className="term-line muted">Waiting for activity...</div>}
+                {pipelineLogs.length === 0 && logs.length === 0 && <div className="term-line muted">Waiting for pipeline activity...</div>}
+                {pipelineLogs.map((log, i) => (
+                  <div key={`p${i}`} className={`term-line term-${log.type}`}>
+                    <span className="term-time">{log.time ? new Date(log.time).toLocaleTimeString() : ''}</span>
+                    {log.text}
+                  </div>
+                ))}
                 {logs.map(log => (
                   <div key={log.id} className={`term-line term-${log.type}`}>
                     <span className="term-time">{log.time}</span>
@@ -540,70 +576,47 @@ function App() {
                 </div>
               ))}
             </div>
-            {latestRun && (
-              <div className="pipeline-latest">
+            <div className="pipeline-latest">
+              {latestRun ? (
+                <>
+                  <div className="pipeline-latest-row">
+                    <span className="muted">Last Strategy</span>
+                    <span className="mono">[{latestRun.allocations.join(', ')}] bps</span>
+                  </div>
+                  <div className="pipeline-latest-row">
+                    <span className="muted">DA Root</span>
+                    <span className="mono">{latestRun.da_data_root ? fmtAddr('0x' + latestRun.da_data_root) : 'N/A'}</span>
+                  </div>
+                </>
+              ) : (
                 <div className="pipeline-latest-row">
-                  <span className="muted">Last Strategy</span>
-                  <span className="mono">[{latestRun.allocations.join(', ')}] bps</span>
+                  <span className="muted">Status</span>
+                  <span>{vaultAUM > 0 ? 'AUM detected — pipeline will run on next cycle' : 'No deposits yet — pipeline waiting'}</span>
                 </div>
-                <div className="pipeline-latest-row">
-                  <span className="muted">DA Root</span>
-                  <span className="mono">{latestRun.da_data_root ? fmtAddr('0x' + latestRun.da_data_root) : 'N/A'}</span>
-                </div>
+              )}
+              <div className="pipeline-latest-row">
+                <span className="muted">TEE Runs</span>
+                <span className="mono">{pipelineState?.history?.length || 0}</span>
               </div>
-            )}
+              <div className="pipeline-latest-row">
+                <span className="muted">AUM Snapshots</span>
+                <span className="mono">{aumSnapshots}</span>
+              </div>
+              <div className="pipeline-latest-row">
+                <span className="muted">Activity Logs</span>
+                <span className="mono">{pipelineLogsCount}</span>
+              </div>
+              <div className="pipeline-latest-row">
+                <span className="muted">DA Verification</span>
+                <span style={{ color: daVerified ? 'var(--c-success)' : 'var(--t-muted)' }}>{daVerified ? 'Enabled' : 'Disabled'}</span>
+              </div>
+              <div className="pipeline-latest-row">
+                <span className="muted">TEE Signer</span>
+                <span className="mono">{vaultConfig ? fmtAddr(vaultConfig.teeSigner) : 'N/A'}</span>
+              </div>
+            </div>
           </div>
         </div>
-
-        {/* Market Sim (collapsible, owner-gated) */}
-        {showMarketPanel && (
-          <div className="card card-market">
-            <div className="card-header">
-              <h3><Sparkles size={18} /> Market Simulation</h3>
-              <span className={`badge ${isOwner ? 'badge-ok' : 'badge-warn'}`}>
-                {isOwner ? 'Owner Connected' : 'Owner Only'}
-              </span>
-            </div>
-            <p className="market-desc muted">
-              Simulate real market yield changes. Adjust pool APYs to see CogniVault's AI autonomously detect and rebalance.
-            </p>
-            <div className="market-sliders">
-              <div className="slider-row">
-                <div className="slider-top">
-                  <span>Lending Pool APY</span>
-                  <span className="slider-val">{(lendingApyInput / 100).toFixed(2)}%</span>
-                </div>
-                <input type="range" min="100" max="2000" value={lendingApyInput}
-                  disabled={!isOwner}
-                  onChange={e => setLendingApyInput(parseInt(e.target.value))} />
-              </div>
-              <div className="slider-row">
-                <div className="slider-top">
-                  <span>AMM Pool APY</span>
-                  <span className="slider-val">{(ammApyInput / 100).toFixed(2)}%</span>
-                </div>
-                <input type="range" className="purple" min="500" max="3000" value={ammApyInput}
-                  disabled={!isOwner}
-                  onChange={e => setAmmApyInput(parseInt(e.target.value))} />
-              </div>
-            </div>
-            <div className="market-actions">
-              <button className="btn-secondary" onClick={handleMarketShift} disabled={!isOwner || marketShiftPending}>
-                <RefreshCw size={15} className={marketShiftPending ? 'spin' : ''} />
-                {marketShiftPending ? 'Updating...' : 'Apply Market Change'}
-              </button>
-              <button className="btn-primary" onClick={handleTriggerRebalance} disabled={rebalancePending}>
-                <Zap size={15} className={rebalancePending ? 'spin' : ''} />
-                {rebalancePending ? 'Rebalancing...' : 'Trigger Rebalance'}
-              </button>
-            </div>
-            {lastRebalanceTx && (
-              <div className="market-tx">
-                <CheckCircle2 size={14} /> Last rebalance: <span className="mono">{fmtAddr(lastRebalanceTx)}</span>
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

@@ -7,31 +7,17 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      # Mock mode — generates pipeline data without needing gas or 0G providers
-      - key: MOCK_RELAYER
-        value: "true"
-      - key: MOCK_COMPUTE
-        value: "true"
-      - key: MOCK_STORAGE
-        value: "true"
-      - key: MOCK_DA
-        value: "true"
-      # Relayer timing
+      - key: PRIVATE_KEY
+        sync: false
+      - key: TEE_PRIVATE_KEY
+        sync: false
+      - key: VAULT_ADDRESS
+        sync: false
+      - key: CORS_ORIGIN
+        value: "*"
       - key: RELAYER_INTERVAL_MS
         value: "60000"
       - key: RELAYER_MAX_CYCLES
         value: "0"
-      # CORS — change to your Vercel URL after frontend deploy
-      - key: CORS_ORIGIN
-        value: "*"
-      # For live mode later, set these (leave empty for mock):
-      # - key: PRIVATE_KEY
-      #   sync: false
-      # - key: VAULT_ADDRESS
-      #   value: "0x9cdabBb1c06C37a7eD297f9a320b6B3518388A45"
-      # - key: MOCK_COMPUTE
-      #   value: "false"
-      # - key: MOCK_STORAGE
-      #   value: "false"
-      # - key: MOCK_DA
-      #   value: "false"
+      - key: MARKET_SIM_INTERVAL_MS
+        value: "300000"

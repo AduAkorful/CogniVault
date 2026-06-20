@@ -17,7 +17,13 @@ export function useVault(vaultAddress, usdcAddress, walletProvider, readOnlyProv
   const getSigner = async () => {
     if (!walletProvider) throw new Error('Wallet not connected');
     const browserProvider = new ethers.BrowserProvider(walletProvider);
-    return browserProvider.getSigner();
+    const signer = await Promise.race([
+      browserProvider.getSigner(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Wallet did not respond. If you have multiple wallet extensions, try disabling all except MetaMask, or use WalletConnect QR code in the modal.')), 20000)
+      )
+    ]);
+    return signer;
   };
 
   const getWriteContract = async () => {
@@ -53,7 +59,10 @@ export function useVault(vaultAddress, usdcAddress, walletProvider, readOnlyProv
       if (onSuccess) onSuccess();
     } catch (err) {
       console.error(err);
-      addLog('error', `Deposit failed: ${err.reason || err.shortMessage || err.message}`);
+      const msg = err.code === 'ACTION_REJECTED'
+        ? 'Transaction rejected in wallet.'
+        : err.shortMessage || err.reason || err.message || 'Deposit failed.';
+      addLog('error', `Deposit failed: ${msg}`);
       throw err;
     }
   };

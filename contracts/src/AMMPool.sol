@@ -8,7 +8,7 @@ interface IMintableERC20 is IERC20 {
     function mint(address to, uint256 amount) external;
 }
 
-contract MockAMMPool is Ownable {
+contract AMMPool is Ownable {
     IMintableERC20 public immutable asset;
     uint256 public apy; // in basis points, e.g., 500 = 5% APY
     uint256 public constant BLOCKS_PER_YEAR = 10_512_000; // 3 seconds per block
@@ -44,7 +44,6 @@ contract MockAMMPool is Ownable {
             return 0;
         }
         uint256 deltaBlocks = block.number - dep.lastDepositBlock;
-        // Yield = (Principal * APY * deltaBlocks) / (BLOCKS_PER_YEAR * 10000)
         return (dep.principal * apy * deltaBlocks) / (BLOCKS_PER_YEAR * 10000);
     }
 
@@ -58,7 +57,6 @@ contract MockAMMPool is Ownable {
 
         DepositInfo storage dep = deposits[msg.sender];
         if (dep.principal > 0) {
-            // Accrue pending yield and add to principal
             uint256 pendingYield = getPendingYield(msg.sender);
             dep.principal += pendingYield;
             if (pendingYield > 0) {
@@ -81,12 +79,10 @@ contract MockAMMPool is Ownable {
         require(amount > 0, "Amount must be > 0");
         require(totalBalance >= amount, "Insufficient balance");
 
-        // Mint pending yield to this contract first so we have the funds to transfer
         if (pendingYield > 0) {
             asset.mint(address(this), pendingYield);
         }
 
-        // Update user balance
         dep.principal = totalBalance - amount;
         dep.lastDepositBlock = block.number;
 

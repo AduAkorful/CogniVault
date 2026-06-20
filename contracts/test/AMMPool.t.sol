@@ -2,19 +2,19 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
-import {MockLendingPool} from "../src/MockLendingPool.sol";
-import {MockUSDC} from "../src/MockUSDC.sol";
+import {AMMPool} from "../src/AMMPool.sol";
+import {USDC} from "../src/USDC.sol";
 
-contract MockLendingPoolTest is Test {
-    MockLendingPool public pool;
-    MockUSDC public usdc;
+contract AMMPoolTest is Test {
+    AMMPool public pool;
+    USDC public usdc;
     address public owner = address(1);
     address public user = address(2);
 
     function setUp() public {
         vm.startPrank(owner);
-        usdc = new MockUSDC();
-        pool = new MockLendingPool(address(usdc), 550); // 5.5% APY
+        usdc = new USDC();
+        pool = new AMMPool(address(usdc), 1200); // 12% APY
         usdc.setMinter(address(pool), true);
         usdc.mint(user, 10_000 * 10**6);
         vm.stopPrank();
@@ -23,31 +23,31 @@ contract MockLendingPoolTest is Test {
         usdc.approve(address(pool), type(uint256).max);
     }
 
-    function testMockLendingPool_InitialState() public view {
+    function testAMMPool_InitialState() public view {
         assertEq(address(pool.asset()), address(usdc));
-        assertEq(pool.getAPY(), 550);
+        assertEq(pool.getAPY(), 1200);
         assertEq(pool.balanceOf(user), 0);
     }
 
-    function testMockLendingPool_SetAPY() public {
+    function testAMMPool_SetAPY() public {
         vm.prank(owner);
-        pool.setAPY(800);
-        assertEq(pool.getAPY(), 800);
+        pool.setAPY(1500);
+        assertEq(pool.getAPY(), 1500);
     }
 
-    function testMockLendingPool_SetAPY_RevertIfNotOwner() public {
+    function testAMMPool_SetAPY_RevertIfNotOwner() public {
         vm.prank(user);
         vm.expectRevert(); // Ownable Unauthorized
-        pool.setAPY(800);
+        pool.setAPY(1500);
     }
 
-    function testMockLendingPool_Deposit_RevertIfZero() public {
+    function testAMMPool_Deposit_RevertIfZero() public {
         vm.prank(user);
         vm.expectRevert("Amount must be > 0");
         pool.deposit(0);
     }
 
-    function testMockLendingPool_Deposit_Basic() public {
+    function testAMMPool_Deposit_Basic() public {
         uint256 amount = 1000 * 10**6;
         vm.prank(user);
         pool.deposit(amount);
@@ -55,7 +55,7 @@ contract MockLendingPoolTest is Test {
         assertEq(pool.getPendingYield(user), 0);
     }
 
-    function testMockLendingPool_Deposit_AccruesInterest() public {
+    function testAMMPool_Deposit_AccruesInterest() public {
         uint256 amount = 1000 * 10**6;
         vm.prank(user);
         pool.deposit(amount);
@@ -76,19 +76,19 @@ contract MockLendingPoolTest is Test {
         assertEq(pool.getPendingYield(user), 0);
     }
 
-    function testMockLendingPool_Withdraw_RevertIfZero() public {
+    function testAMMPool_Withdraw_RevertIfZero() public {
         vm.prank(user);
         vm.expectRevert("Amount must be > 0");
         pool.withdraw(0);
     }
 
-    function testMockLendingPool_Withdraw_RevertIfInsufficient() public {
+    function testAMMPool_Withdraw_RevertIfInsufficient() public {
         vm.prank(user);
         vm.expectRevert("Insufficient balance");
         pool.withdraw(100);
     }
 
-    function testMockLendingPool_Withdraw_Basic() public {
+    function testAMMPool_Withdraw_Basic() public {
         uint256 amount = 1000 * 10**6;
         vm.prank(user);
         pool.deposit(amount);
@@ -105,13 +105,13 @@ contract MockLendingPoolTest is Test {
         assertEq(pool.balanceOf(user), amount + pending - 500 * 10**6);
     }
 
-    function testMockLendingPool_WithdrawAll_RevertIfZero() public {
+    function testAMMPool_WithdrawAll_RevertIfZero() public {
         vm.prank(user);
         vm.expectRevert("Nothing to withdraw");
         pool.withdrawAll();
     }
 
-    function testMockLendingPool_WithdrawAll_Basic() public {
+    function testAMMPool_WithdrawAll_Basic() public {
         uint256 amount = 1000 * 10**6;
         vm.prank(user);
         pool.deposit(amount);

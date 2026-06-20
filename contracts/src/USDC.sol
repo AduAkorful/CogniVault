@@ -4,18 +4,17 @@ pragma solidity ^0.8.20;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract MockUSDC is ERC20, Ownable {
+contract USDC is ERC20, Ownable {
     mapping(address => bool) public isMinter;
 
     event MinterStatusUpdated(address indexed minter, bool status);
 
     modifier onlyMinterOrOwner() {
-        require(msg.sender == owner() || isMinter[msg.sender], "MockUSDC: caller is not minter or owner");
+        require(msg.sender == owner() || isMinter[msg.sender], "USDC: caller is not minter or owner");
         _;
     }
 
-    constructor() ERC20("Mock USDC", "mUSDC") Ownable(msg.sender) {
-        // Mint initial supply to owner
+    constructor() ERC20("USD Coin", "USDC") Ownable(msg.sender) {
         _mint(msg.sender, 1_000_000 * 10**decimals());
     }
 
