@@ -51,7 +51,7 @@ contract AIGovernedVault is
     event Rebalanced(address[] targets, uint256[] allocations, bytes32 indexed daBlobHash);
     event PoolWhitelistUpdated(address indexed pool, bool status);
     event TeeSignerUpdated(address indexed teeSigner);
-    event DAVerified(bytes32 indexed daBlobHash, bytes32 indexed dataRoot);
+    event DAVerified(bytes32 indexed daBlobHash, bytes32 indexed dataRoot, uint256 epoch, uint256 quorumId);
     event DAEntranceUpdated(address indexed daEntranceContract);
     event DAVerificationToggled(bool enabled);
     event PriceOracleUpdated(address indexed priceOracle);
@@ -148,24 +148,26 @@ contract AIGovernedVault is
         address[] calldata targets,
         bytes calldata signature,
         bytes32 daBlobHash,
-        bytes32 dataRoot
+        bytes32 dataRoot,
+        uint256 daEpoch,
+        uint256 daQuorumId
     ) external {
         uint256 len = targets.length;
         require(len == allocations.length, "Mismatched inputs");
         require(len > 0, "Empty strategy");
         require(len <= MAX_ACTIVE_POOLS, "Active pool limit exceeded");
 
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot, daEpoch, daQuorumId));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         address recovered = ethSignedMessageHash.recover(signature);
         require(recovered == teeSigner, "Invalid TEE signature");
 
         if (daVerificationEnabled && daEntranceContract != address(0)) {
             require(
-                IDAEntrance(daEntranceContract).isDataRootConfirmed(dataRoot),
+                IDAEntrance(daEntranceContract).commitmentExists(dataRoot, daEpoch, daQuorumId),
                 "DA blob not confirmed"
             );
-            emit DAVerified(daBlobHash, dataRoot);
+            emit DAVerified(daBlobHash, dataRoot, daEpoch, daQuorumId);
         }
 
         uint256 activeLen = activePools.length;

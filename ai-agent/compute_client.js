@@ -146,10 +146,12 @@ Provide output as raw JSON containing "lending_bps" and "amm_bps".`;
     const daResult = await disperseToDA(preSignPayload);
     const daBlobHash = daResult.blobHash;
     const dataRoot = daResult.dataRoot;
+    const daEpoch = daResult.epoch;
+    const daQuorumId = daResult.quorumId;
 
     const encoded = AbiCoder.defaultAbiCoder().encode(
-      ['uint256[]', 'address[]', 'bytes32', 'bytes32'],
-      [allocations, targets, daBlobHash, dataRoot]
+      ['uint256[]', 'address[]', 'bytes32', 'bytes32', 'uint256', 'uint256'],
+      [allocations, targets, daBlobHash, dataRoot, daEpoch, daQuorumId]
     );
     messageHash = keccak256(encoded);
     signature = await TEE_WALLET.signMessage(getBytes(messageHash));
@@ -160,8 +162,8 @@ Provide output as raw JSON containing "lending_bps" and "amm_bps".`;
       targets,
       da_blob_hash: daBlobHash.replace('0x', ''),
       da_data_root: dataRoot.replace('0x', ''),
-      da_epoch: daResult.epoch,
-      da_quorum_id: daResult.quorumId,
+      da_epoch: daEpoch,
+      da_quorum_id: daQuorumId,
       signature: signature.replace('0x', ''),
       message_hash: messageHash.replace('0x', '')
     };

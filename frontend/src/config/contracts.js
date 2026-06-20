@@ -19,7 +19,7 @@ export const VAULT_ABI = [
   "function deposit(uint256, address) returns (uint256)",
   "function withdraw(uint256, address, address) returns (uint256)",
   "function redeem(uint256, address, address) returns (uint256)",
-  "function executeAIStrategy(uint256[] allocations, address[] targets, bytes signature, bytes32 daBlobHash, bytes32 dataRoot) external",
+  "function executeAIStrategy(uint256[] allocations, address[] targets, bytes signature, bytes32 daBlobHash, bytes32 dataRoot, uint256 daEpoch, uint256 daQuorumId) external",
   "function setAPY(uint256) external",
   "event Rebalanced(address[] targets, uint256[] allocations, bytes32 indexed daBlobHash)"
 ];

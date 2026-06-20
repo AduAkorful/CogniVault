@@ -15,12 +15,11 @@ import {
 } from './config/contracts';
 import { useVault } from './hooks/useVault';
 
-const STATE_JSON_URL = import.meta.env.VITE_PIPELINE_API_URL
-  ? `${import.meta.env.VITE_PIPELINE_API_URL}/state.json`
-  : '/state.json';
-const DEPLOYMENTS_URL = import.meta.env.VITE_PIPELINE_API_URL
-  ? `${import.meta.env.VITE_PIPELINE_API_URL}/deployments.json`
-  : '/deployments.json';
+// Contract addresses are static — always load from the build-time bundle.
+const DEPLOYMENTS_URL = '/deployments.json';
+// Live pipeline telemetry comes from the Render API when configured.
+const PIPELINE_API = import.meta.env.VITE_PIPELINE_API_URL?.replace(/\/$/, '') || '';
+const STATE_JSON_URL = PIPELINE_API ? `${PIPELINE_API}/state.json` : '/state.json';
 const SYNC_INTERVAL = 15000;
 
 function App() {

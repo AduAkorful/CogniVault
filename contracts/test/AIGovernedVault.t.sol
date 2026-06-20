@@ -129,13 +129,13 @@ contract AIGovernedVaultTest is Test {
         bytes32 dataRoot = bytes32(0);
         
         // Sign with invalid private key (e.g. user key instead of TEE key)
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot, uint256(0), uint256(0)));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(999, ethSignedMessageHash);
         bytes memory badSignature = abi.encodePacked(r, s, v);
 
         vm.expectRevert("Invalid TEE signature");
-        vault.executeAIStrategy(allocations, targets, badSignature, daBlobHash, dataRoot);
+        vault.executeAIStrategy(allocations, targets, badSignature, daBlobHash, dataRoot, 0, 0);
     }
 
     function testRebalanceAndInterestAccrual() public {
@@ -160,13 +160,13 @@ contract AIGovernedVaultTest is Test {
         bytes32 dataRoot = bytes32(0);
 
         // Sign with correct TEE key
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot, uint256(0), uint256(0)));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
         // Execute Strategy
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot, 0, 0);
 
         // Verify deposits into pools (60% to lending, 40% to AMM)
         assertEq(lendingPool.balanceOf(address(vault)), 6_000 * 10**6);
@@ -195,13 +195,13 @@ contract AIGovernedVaultTest is Test {
         allocations[1] = 7000;
         daBlobHash = keccak256("da-blob-run-2");
 
-        messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot));
+        messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot, uint256(0), uint256(0)));
         ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (v, r, s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         signature = abi.encodePacked(r, s, v);
 
         // Rebalance
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot, 0, 0);
 
         // All yield should be harvested and folded into new pools
         uint256 newTotalAUM = 10_000 * 10**6 + expectedLendingYield + expectedAmmYield;
@@ -221,13 +221,13 @@ contract AIGovernedVaultTest is Test {
         bytes32 daBlobHash = keccak256("da-blob-duplicate");
         bytes32 dataRoot = bytes32(0);
 
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot, uint256(0), uint256(0)));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
         vm.expectRevert("Duplicate targets not allowed");
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot, 0, 0);
     }
 
     // New tests to reach 100% coverage
@@ -428,12 +428,12 @@ contract AIGovernedVaultTest is Test {
         
         bytes32 daBlobHash = keccak256("da-blob-zero");
         bytes32 dataRoot = bytes32(0);
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot, uint256(0), uint256(0)));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot, 0, 0);
         
         assertEq(lendingPool.balanceOf(address(vault)), depositAmount);
         assertEq(ammPool.balanceOf(address(vault)), 0);
@@ -447,12 +447,12 @@ contract AIGovernedVaultTest is Test {
         allocations[0] = 0;
         allocations[1] = 10000;
         
-        messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot));
+        messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot, uint256(0), uint256(0)));
         ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (v, r, s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         signature = abi.encodePacked(r, s, v);
         
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot, 0, 0);
         
         assertEq(lendingPool.balanceOf(address(vault)), 0);
         assertEq(ammPool.balanceOf(address(vault)), depositAmount);
@@ -480,12 +480,12 @@ contract AIGovernedVaultTest is Test {
         bytes memory sig;
         
         vm.expectRevert("Empty strategy");
-        vault.executeAIStrategy(emptyAlloc, emptyTargets, sig, bytes32(0), bytes32(0));
+        vault.executeAIStrategy(emptyAlloc, emptyTargets, sig, bytes32(0), bytes32(0), 0, 0);
         
         uint256[] memory allocMismatch = new uint256[](2);
         address[] memory targetsMismatch = new address[](1);
         vm.expectRevert("Mismatched inputs");
-        vault.executeAIStrategy(allocMismatch, targetsMismatch, sig, bytes32(0), bytes32(0));
+        vault.executeAIStrategy(allocMismatch, targetsMismatch, sig, bytes32(0), bytes32(0), 0, 0);
         
         // Allocate to non-whitelisted target
         uint256[] memory alloc = new uint256[](1);
@@ -495,13 +495,13 @@ contract AIGovernedVaultTest is Test {
         
         bytes32 daBlobHash = keccak256("da-blob-test");
         bytes32 dataRoot = bytes32(0);
-        bytes32 messageHash = keccak256(abi.encode(alloc, targets, daBlobHash, dataRoot));
+        bytes32 messageHash = keccak256(abi.encode(alloc, targets, daBlobHash, dataRoot, uint256(0), uint256(0)));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert("Target not whitelisted");
-        vault.executeAIStrategy(alloc, targets, signature, daBlobHash, dataRoot);
+        vault.executeAIStrategy(alloc, targets, signature, daBlobHash, dataRoot, 0, 0);
         
         // Whitelist the target but fail allocation sum
         vm.prank(owner);
@@ -509,13 +509,13 @@ contract AIGovernedVaultTest is Test {
         
         alloc[0] = 9999; // 99.99% instead of 100%
         
-        messageHash = keccak256(abi.encode(alloc, targets, daBlobHash, dataRoot));
+        messageHash = keccak256(abi.encode(alloc, targets, daBlobHash, dataRoot, uint256(0), uint256(0)));
         ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (v, r, s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert("Allocations must sum to 100%");
-        vault.executeAIStrategy(alloc, targets, signature, daBlobHash, dataRoot);
+        vault.executeAIStrategy(alloc, targets, signature, daBlobHash, dataRoot, 0, 0);
 
         // Test MAX_ACTIVE_POOLS limit
         uint256 maxLimitPlusOne = vault.MAX_ACTIVE_POOLS() + 1;
@@ -525,7 +525,7 @@ contract AIGovernedVaultTest is Test {
             tooManyTargets[i] = address(uint160(i + 1000));
         }
         vm.expectRevert("Active pool limit exceeded");
-        vault.executeAIStrategy(tooManyAllocs, tooManyTargets, sig, bytes32(0), bytes32(0));
+        vault.executeAIStrategy(tooManyAllocs, tooManyTargets, sig, bytes32(0), bytes32(0), 0, 0);
     }
 
     function testERC4626_LimitsAndPreviews() public view {
@@ -584,12 +584,12 @@ contract AIGovernedVaultTest is Test {
         
         bytes32 daBlobHash = keccak256("da-blob-fuzz-alloc");
         bytes32 dataRoot = bytes32(0);
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, dataRoot, uint256(0), uint256(0)));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot, 0, 0);
         
         // Verify split
         uint256 expectedLending = (depositAmount * alloc1) / 10000;
@@ -619,25 +619,27 @@ contract AIGovernedVaultTest is Test {
 
         bytes32 daBlobHash = keccak256("da-blob-verification");
         bytes32 testRoot = keccak256("data-root-confirmed");
+        uint256 daEpoch = 55;
+        uint256 daQuorumId = 0;
 
         // 1. Set root confirmation status to false in mock
-        testDAEntrance.setConfirmed(testRoot, false);
+        testDAEntrance.setConfirmed(testRoot, daEpoch, daQuorumId, false);
 
         // Sign with correct TEE key but with dataRoot
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, testRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, testRoot, daEpoch, daQuorumId));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
         // Rebalance should fail because data root is not confirmed
         vm.expectRevert("DA blob not confirmed");
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot, daEpoch, daQuorumId);
 
         // 2. Set root confirmation status to true in mock
-        testDAEntrance.setConfirmed(testRoot, true);
+        testDAEntrance.setConfirmed(testRoot, daEpoch, daQuorumId, true);
 
         // Should now succeed
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot, daEpoch, daQuorumId);
         assertEq(lendingPool.balanceOf(address(vault)), 5_000 * 10**6);
         assertEq(ammPool.balanceOf(address(vault)), 5_000 * 10**6);
     }
@@ -662,13 +664,13 @@ contract AIGovernedVaultTest is Test {
         bytes32 daBlobHash = keccak256("da-blob-slippage-ok");
         bytes32 testRoot = bytes32(0);
 
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, testRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, testRoot, uint256(0), uint256(0)));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
         // Should succeed
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot, 0, 0);
     }
 
     function testSlippage_ExceedsThreshold() public {
@@ -691,14 +693,14 @@ contract AIGovernedVaultTest is Test {
         bytes32 daBlobHash = keccak256("da-blob-slippage-fail");
         bytes32 testRoot = bytes32(0);
 
-        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, testRoot));
+        bytes32 messageHash = keccak256(abi.encode(allocations, targets, daBlobHash, testRoot, uint256(0), uint256(0)));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePrivateKey, ethSignedMessageHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
         // Should revert because slippage exceeds maximum
         vm.expectRevert("Slippage exceeds maximum");
-        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot);
+        vault.executeAIStrategy(allocations, targets, signature, daBlobHash, testRoot, 0, 0);
     }
 
     function testSlippage_OwnerControls() public {

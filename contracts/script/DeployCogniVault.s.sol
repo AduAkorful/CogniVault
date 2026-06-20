@@ -8,6 +8,7 @@ import {LendingPool} from "../src/LendingPool.sol";
 import {AMMPool} from "../src/AMMPool.sol";
 import {AIGovernedVault} from "../src/AIGovernedVault.sol";
 import {PriceOracle} from "../src/PriceOracle.sol";
+import {CogniDAVerifier} from "../src/CogniDAVerifier.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -41,8 +42,9 @@ contract DeployCogniVault is Script {
         vault.setPoolWhitelist(address(lendingPool), true);
         vault.setPoolWhitelist(address(ammPool), true);
 
-        // 5. Configure DA verification with real 0G DA Entrance
-        vault.setDAEntrance(DA_ENTRANCE);
+        // 5. Deploy Cogni DA verifier (delegates to upstream entrance when available)
+        CogniDAVerifier daVerifier = new CogniDAVerifier(DA_ENTRANCE);
+        vault.setDAEntrance(address(daVerifier));
         vault.setDAVerification(true);
 
         // 6. Deploy and configure Price Oracle
@@ -63,6 +65,7 @@ contract DeployCogniVault is Script {
         console.log("Deployed AIGovernedVault proxy at:", address(proxy));
         console.log("Deployed AIGovernedVault impl at:", address(impl));
         console.log("Deployed PriceOracle at:", address(priceOracle));
-        console.log("Using 0G DA Entrance at:", DA_ENTRANCE);
+        console.log("Deployed CogniDAVerifier at:", address(daVerifier));
+        console.log("Using upstream 0G DA Entrance at:", DA_ENTRANCE);
     }
 }

@@ -28,14 +28,8 @@ contract UpgradeVault is Script {
         address newImpl = Upgrades.getImplementationAddress(proxyAddr);
         console.log("Vault upgraded. New implementation:", newImpl);
 
-        // Update deployments.json with new implementation address
-        string memory json = string(abi.encodePacked(
-            '{"network":"0G-Galileo-Testnet","chainId":16602,"rpcUrl":"https://evmrpc-testnet.0g.ai","blockExplorer":"https://chainscan-galileo.0g.ai",',
-            '"contracts":{',
-            '"vault":{"proxy":"', vm.toString(proxyAddr), '","implementation":"', vm.toString(newImpl), '"}',
-            '}}'
-        ));
-        vm.writeJson(json, "deployments.json");
-        console.log("Updated deployments.json with new implementation address");
+        string memory deploymentsPath = string.concat(root, "/../deployments.json");
+        vm.writeJson(vm.toString(newImpl), deploymentsPath, ".contracts.vault.implementation");
+        console.log("Updated deployments.json implementation address");
     }
 }

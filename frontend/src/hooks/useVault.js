@@ -86,12 +86,12 @@ export function useVault(vaultAddress, usdcAddress, walletProvider, readOnlyProv
     }
   };
 
-  const executeAIStrategy = async (allocations, targets, signature, daBlobHash, dataRoot, addLog, onSuccess) => {
+  const executeAIStrategy = async (allocations, targets, signature, daBlobHash, dataRoot, daEpoch, daQuorumId, addLog, onSuccess) => {
     try {
       addLog('system', 'Executing AI strategy on-chain...');
       const vaultContract = await getWriteContract();
       const tx = await vaultContract.executeAIStrategy(
-        allocations, targets, signature, daBlobHash, dataRoot
+        allocations, targets, signature, daBlobHash, dataRoot, daEpoch, daQuorumId
       );
       addLog('info', `Tx: ${tx.hash}`);
       await tx.wait();

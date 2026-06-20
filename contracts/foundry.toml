@@ -11,3 +11,13 @@ remappings = [
     "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
     "@openzeppelin/foundry-upgrades/=node_modules/@openzeppelin/foundry-upgrades/src/"
 ]
+
+fs_permissions = [
+    { access = "read-write", path = "../deployments.json" },
+    { access = "read", path = "../" }
+]
+
+[profile.script]
+via_ir = false
+optimizer = true
+optimizer_runs = 200

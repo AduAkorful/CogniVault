@@ -12,7 +12,8 @@ const STATE_FILE = path.join(__dirname, '..', 'state.json');
 const DEPLOYMENTS_FILE = path.join(__dirname, '..', 'deployments.json');
 
 const PORT = parseInt(process.env.API_PORT || '3100', 10);
-const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+// Strip trailing slash — browsers never send Origin with one, so an exact match is required.
+const CORS_ORIGIN = (process.env.CORS_ORIGIN || '*').replace(/\/$/, '');
 
 const server = http.createServer((req, res) => {
   // CORS headers

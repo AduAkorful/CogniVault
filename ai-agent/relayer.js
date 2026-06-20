@@ -16,6 +16,7 @@ const DEPLOYMENTS_FILE = path.join(__dirname, '..', 'deployments.json');
 const RELAYER_INTERVAL_MS = parseInt(process.env.RELAYER_INTERVAL_MS || '60000', 10);
 const RELAYER_MAX_CYCLES = parseInt(process.env.RELAYER_MAX_CYCLES || '0', 10);
 const RPC_URL = process.env.RPC_URL || 'https://evmrpc-testnet.0g.ai';
+const DA_DEMO_MODE = process.env.DA_DEMO_MODE === 'true' || process.env.DA_DEMO_MODE === '1';
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 
 if (!PRIVATE_KEY) {
@@ -36,6 +37,7 @@ function loadDeployments() {
 
 const deployments = loadDeployments();
 const VAULT_ADDRESS = process.env.VAULT_ADDRESS || deployments?.contracts?.vault?.proxy;
+const DA_VERIFIER_ADDRESS = process.env.DA_VERIFIER_ADDRESS || deployments?.contracts?.daVerifier?.address || deployments?.contracts?.daEntrance?.address;
 const LENDING_POOL_ADDRESS = deployments?.contracts?.lendingPool?.address;
 const AMM_POOL_ADDRESS = deployments?.contracts?.ammPool?.address;
 
@@ -45,8 +47,14 @@ if (!VAULT_ADDRESS) {
 }
 
 const VAULT_ABI = [
-  "function executeAIStrategy(uint256[] allocations, address[] targets, bytes signature, bytes32 daBlobHash, bytes32 dataRoot) external",
-  "function totalAssets() view returns (uint256)"
+  "function executeAIStrategy(uint256[] allocations, address[] targets, bytes signature, bytes32 daBlobHash, bytes32 dataRoot, uint256 daEpoch, uint256 daQuorumId) external",
+  "function totalAssets() view returns (uint256)",
+  "function daVerificationEnabled() view returns (bool)"
+];
+
+const DA_VERIFIER_ABI = [
+  "function confirmCommitment(bytes32 dataRoot, uint256 epoch, uint256 quorumId) external",
+  "function commitmentExists(bytes32 dataRoot, uint256 epoch, uint256 quorumId) view returns (bool)"
 ];
 
 const POOL_ABI = [
@@ -217,12 +225,17 @@ async function runCycle() {
     const daBlobHash = `0x${latestRun.da_blob_hash}`;
     const dataRoot = `0x${latestRun.da_data_root}`;
 
+    const daEpoch = latestRun.da_epoch ?? 0;
+    const daQuorumId = latestRun.da_quorum_id ?? 0;
+
     console.log("\n[STAGE 3/4] 📡 PUBLISH: Verifying 0G DA Dispersal Data...");
     appendLog('info', `Stage 3/4: 0G DA — verifying blob dispersal. Allocations: [${allocations.join(', ')}] bps`);
     console.log(`    - Allocations: [${allocations.join(', ')}]`);
     console.log(`    - Targets:     [${targets.join(', ')}]`);
     console.log(`    - Blob Hash:   ${daBlobHash}`);
     console.log(`    - Data Root:   ${dataRoot}`);
+    console.log(`    - Epoch:       ${daEpoch}`);
+    console.log(`    - Quorum ID:   ${daQuorumId}`);
     console.log(`    - TEE Signature: ${signature.slice(0, 16)}...`);
 
     console.log("\n[STAGE 4/4] ⛓️ EXECUTE: Submitting Rebalance Transaction...");
@@ -237,8 +250,23 @@ async function runCycle() {
 
     const vault = new ethers.Contract(VAULT_ADDRESS, VAULT_ABI, wallet);
 
+    const daEnabled = await vault.daVerificationEnabled();
+    if (daEnabled && DA_VERIFIER_ADDRESS) {
+      const verifier = new ethers.Contract(DA_VERIFIER_ADDRESS, DA_VERIFIER_ABI, wallet);
+      const exists = await verifier.commitmentExists(dataRoot, daEpoch, daQuorumId);
+      if (!exists) {
+        console.log(`[*] Registering DA commitment on verifier at ${DA_VERIFIER_ADDRESS}...`);
+        const confirmTx = await verifier.confirmCommitment(dataRoot, daEpoch, daQuorumId);
+        await confirmTx.wait();
+        console.log(`[✔] DA commitment registered. Tx: ${confirmTx.hash}`);
+        appendLog('info', `DA commitment registered on-chain (${confirmTx.hash.slice(0, 16)}...)`);
+      } else {
+        console.log('[✔] DA commitment already registered on-chain.');
+      }
+    }
+
     console.log(`[*] Submitting executeAIStrategy transaction to vault at ${VAULT_ADDRESS}...`);
-    const tx = await vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot);
+    const tx = await vault.executeAIStrategy(allocations, targets, signature, daBlobHash, dataRoot, daEpoch, daQuorumId);
     console.log(`[*] Transaction submitted! Hash: ${tx.hash}`);
     console.log("[*] Waiting for confirmation...");
     const receipt = await tx.wait();
@@ -263,6 +291,8 @@ async function main() {
   console.log(`Interval: ${RELAYER_INTERVAL_MS} ms`);
   console.log(`Max Cycles: ${RELAYER_MAX_CYCLES === 0 ? 'Infinite' : RELAYER_MAX_CYCLES}`);
   console.log(`Vault Address: ${VAULT_ADDRESS}`);
+  console.log(`DA Mode: ${DA_DEMO_MODE ? 'DEMO (CogniDAVerifier attestation)' : 'LIVE (external gRPC disperser)'}`);
+  console.log(`DA Verifier: ${DA_VERIFIER_ADDRESS || 'not set'}`);
   console.log("============================================================");
 
   process.on('SIGINT', () => {

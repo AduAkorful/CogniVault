@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package disperser;
+
+service Disperser {
+  rpc DisperseBlob(DisperseBlobRequest) returns (DisperseBlobReply) {}
+  rpc GetBlobStatus(BlobStatusRequest) returns (BlobStatusReply) {}
+}
+
+message DisperseBlobRequest {
+  bytes data = 1;
+}
+
+message DisperseBlobReply {
+  BlobStatus result = 1;
+  bytes request_id = 2;
+}
+
+message BlobStatusRequest {
+  bytes request_id = 1;
+}
+
+message BlobStatusReply {
+  BlobStatus status = 1;
+  BlobInfo info = 2;
+}
+
+enum BlobStatus {
+  UNKNOWN = 0;
+  PROCESSING = 1;
+  CONFIRMED = 2;
+  FAILED = 3;
+  FINALIZED = 4;
+  INSUFFICIENT_SIGNATURES = 5;
+}
+
+message BlobInfo {
+  BlobHeader blob_header = 1;
+}
+
+message BlobHeader {
+  bytes storage_root = 1;
+  uint64 epoch = 2;
+  uint64 quorum_id = 3;
+}

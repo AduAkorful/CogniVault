@@ -86,7 +86,7 @@ def optimize_portfolio(state):
 
     return alloc_lending_bps, alloc_amm_bps
 
-def sign_strategy(allocations, targets, da_blob_hash, data_root):
+def sign_strategy(allocations, targets, da_blob_hash, data_root, da_epoch=0, da_quorum_id=0):
     from eth_abi import encode
 
     if isinstance(da_blob_hash, str):
@@ -102,8 +102,8 @@ def sign_strategy(allocations, targets, da_blob_hash, data_root):
             data_root = bytes.fromhex(data_root)
 
     encoded = encode(
-        ['uint256[]', 'address[]', 'bytes32', 'bytes32'],
-        [allocations, targets, da_blob_hash, data_root]
+        ['uint256[]', 'address[]', 'bytes32', 'bytes32', 'uint256', 'uint256'],
+        [allocations, targets, da_blob_hash, data_root, da_epoch, da_quorum_id]
     )
 
     message_hash = Web3.keccak(encoded)
