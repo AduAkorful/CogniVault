@@ -78,11 +78,11 @@ async function main() {
     let computeProvider = process.env.COMPUTE_PROVIDER;
     if (!computeProvider) {
       console.log("[*] COMPUTE_PROVIDER not set. Auto-discovering available providers...");
-      const providerList = await broker.inference.getServiceProviderList();
+      const providerList = await broker.inference.listService();
       if (!providerList || providerList.length === 0) {
         throw new Error("No 0G Compute providers available");
       }
-      computeProvider = providerList[0];
+      computeProvider = providerList[0].provider;
       console.log(`[✔] Auto-discovered Compute Provider: ${computeProvider}`);
     }
 
