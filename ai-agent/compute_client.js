@@ -41,6 +41,39 @@ if (!TEE_PRIVATE_KEY) {
 const TEE_WALLET = new ethers.Wallet(TEE_PRIVATE_KEY);
 const TEE_ADDRESS = TEE_WALLET.address;
 
+const LEDGER_INITIAL_BALANCE = parseFloat(process.env.LEDGER_INITIAL_BALANCE || '3');
+const SUBACCOUNT_FUND_AMOUNT = BigInt(process.env.SUBACCOUNT_FUND_AMOUNT || '1000000000000000000');
+
+async function ensureLedgerAndSubAccount(broker, computeProvider) {
+  let ledgerExists = false;
+  try {
+    await broker.ledger.getLedger();
+    ledgerExists = true;
+  } catch {
+    ledgerExists = false;
+  }
+
+  if (!ledgerExists) {
+    console.log(`[*] No ledger found. Creating ledger with ${LEDGER_INITIAL_BALANCE} 0G...`);
+    await broker.ledger.addLedger(LEDGER_INITIAL_BALANCE);
+    console.log("[✔] Ledger created successfully.");
+  }
+
+  let subAccountExists = false;
+  try {
+    await broker.inference.getAccount(computeProvider);
+    subAccountExists = true;
+  } catch {
+    subAccountExists = false;
+  }
+
+  if (!subAccountExists) {
+    console.log(`[*] No sub-account for provider ${computeProvider}. Transferring funds...`);
+    await broker.ledger.transferFund(computeProvider, 'inference', SUBACCOUNT_FUND_AMOUNT);
+    console.log("[✔] Sub-account funded successfully.");
+  }
+}
+
 async function main() {
   console.log("============================================================");
   console.log("🖥️ COGNIVAULT TEE COMPUTE NETWORK CLIENT");
@@ -85,6 +118,8 @@ async function main() {
       computeProvider = providerList[0].provider;
       console.log(`[✔] Auto-discovered Compute Provider: ${computeProvider}`);
     }
+
+    await ensureLedgerAndSubAccount(broker, computeProvider);
 
     console.log(`Connecting to Compute Provider: ${computeProvider}`);
     const { endpoint, model } = await broker.inference.getServiceMetadata(computeProvider);
