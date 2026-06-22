@@ -4,10 +4,10 @@ import { fileURLToPath } from 'url';
 import { ethers, keccak256, AbiCoder } from 'ethers';
 import dotenv from 'dotenv';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const STATE_FILE = path.join(__dirname, '..', 'state.json');
 const PROTO_PATH = path.join(__dirname, 'proto', 'disperser.proto');

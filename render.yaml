@@ -17,6 +17,8 @@ services:
         value: "0x65D14359B928d46A922F52165D330B000fbd1248"
       - key: DA_DEMO_MODE
         value: "true"
+      - key: COMPUTE_DEMO_MODE
+        value: "true"
       - key: DA_CLIENT_GRPC
         sync: false
       - key: CORS_ORIGIN

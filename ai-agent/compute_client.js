@@ -6,10 +6,10 @@ import { createZGComputeNetworkBroker } from '@0gfoundation/0g-compute-ts-sdk';
 import { disperseToDA, updateStateWithDA } from './da_client.js';
 import dotenv from 'dotenv';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const STATE_FILE = path.join(__dirname, '..', 'state.json');
 const DEPLOYMENTS_FILE = path.join(__dirname, '..', 'deployments.json');
@@ -104,30 +104,47 @@ async function main() {
 
   console.log("[*] Dispatching inference request to 0G Compute Network...");
   try {
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
-    const userWallet = new ethers.Wallet(PRIVATE_KEY, provider);
-    const broker = await createZGComputeNetworkBroker(userWallet);
+    const COMPUTE_DEMO_MODE = process.env.COMPUTE_DEMO_MODE === 'true' || process.env.COMPUTE_DEMO_MODE === '1';
 
-    let computeProvider = process.env.COMPUTE_PROVIDER;
-    if (!computeProvider) {
-      console.log("[*] COMPUTE_PROVIDER not set. Auto-discovering available providers...");
-      const providerList = await broker.inference.listService();
-      if (!providerList || providerList.length === 0) {
-        throw new Error("No 0G Compute providers available");
+    if (COMPUTE_DEMO_MODE) {
+      console.log("[*] COMPUTE_DEMO_MODE is active. Simulating TEE Inference locally...");
+      let lendingBps = 5000;
+      let ammBps = 5000;
+      if (lendingAPY > ammAPY) {
+        lendingBps = 6000;
+        ammBps = 4000;
+      } else if (ammAPY > lendingAPY) {
+        lendingBps = 4000;
+        ammBps = 6000;
       }
-      computeProvider = providerList[0].provider;
-      console.log(`[✔] Auto-discovered Compute Provider: ${computeProvider}`);
-    }
+      allocations = [lendingBps, ammBps];
+      console.log(`[✔] Simulated allocations: Lending: ${lendingBps} bps, AMM: ${ammBps} bps`);
+    } else {
+      console.log("[*] Dispatching inference request to 0G Compute Network...");
+      const provider = new ethers.JsonRpcProvider(RPC_URL);
+      const userWallet = new ethers.Wallet(PRIVATE_KEY, provider);
+      const broker = await createZGComputeNetworkBroker(userWallet);
 
-    await ensureLedgerAndSubAccount(broker, computeProvider);
+      let computeProvider = process.env.COMPUTE_PROVIDER;
+      if (!computeProvider) {
+        console.log("[*] COMPUTE_PROVIDER not set. Auto-discovering available providers...");
+        const providerList = await broker.inference.listService();
+        if (!providerList || providerList.length === 0) {
+          throw new Error("No 0G Compute providers available");
+        }
+        computeProvider = providerList[0].provider;
+        console.log(`[✔] Auto-discovered Compute Provider: ${computeProvider}`);
+      }
 
-    console.log(`Connecting to Compute Provider: ${computeProvider}`);
-    const { endpoint, model } = await broker.inference.getServiceMetadata(computeProvider);
-    console.log(`Service Metadata: endpoint=${endpoint}, model=${model}`);
+      await ensureLedgerAndSubAccount(broker, computeProvider);
 
-    const headers = await broker.inference.getRequestHeaders(computeProvider);
+      console.log(`Connecting to Compute Provider: ${computeProvider}`);
+      const { endpoint, model } = await broker.inference.getServiceMetadata(computeProvider);
+      console.log(`Service Metadata: endpoint=${endpoint}, model=${model}`);
 
-    const prompt = `Optimize portfolio allocations for the following pool yields:
+      const headers = await broker.inference.getRequestHeaders(computeProvider);
+
+      const prompt = `Optimize portfolio allocations for the following pool yields:
 Lending Pool APY: ${lendingAPY} bps
 Lending Pool Risk: ${lendingRisk}
 AMM Pool APY: ${ammAPY} bps
@@ -135,41 +152,42 @@ AMM Pool Risk: ${ammRisk}
 Risk limit: ${maxRisk}
 Provide output as raw JSON containing "lending_bps" and "amm_bps".`;
 
-    const response = await fetch(`${endpoint}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
+      const response = await fetch(`${endpoint}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
 
-    const data = await response.json();
-    const answer = data.choices[0].message.content;
-    console.log(`Raw Inference Output:\n${answer}`);
+      const data = await response.json();
+      const answer = data.choices[0].message.content;
+      console.log(`Raw Inference Output:\n${answer}`);
 
-    const chatID = response.headers.get("ZG-Res-Key") || data.id;
-    if (chatID) {
-      console.log(`Verifying TEE signature via broker client (chatID: ${chatID})...`);
-      const isValid = await broker.inference.processResponse(computeProvider, chatID);
-      console.log(`[✔] TEE signature verification check: ${isValid ? "VALID" : "INVALID"}`);
-      if (!isValid) {
-        throw new Error("Response TEE signature verification failed!");
+      const chatID = response.headers.get("ZG-Res-Key") || data.id;
+      if (chatID) {
+        console.log(`Verifying TEE signature via broker client (chatID: ${chatID})...`);
+        const isValid = await broker.inference.processResponse(computeProvider, chatID);
+        console.log(`[✔] TEE signature verification check: ${isValid ? "VALID" : "INVALID"}`);
+        if (!isValid) {
+          throw new Error("Response TEE signature verification failed!");
+        }
+      } else {
+        console.warn("[Warning] No ZG-Res-Key response header found. Skipping TEE signature verification.");
       }
-    } else {
-      console.warn("[Warning] No ZG-Res-Key response header found. Skipping TEE signature verification.");
-    }
 
-    const jsonMatch = answer.match(/\{[\s\S]*?\}/);
-    if (!jsonMatch) {
-      throw new Error("Failed to parse JSON allocations from model response.");
-    }
-    const parsed = JSON.parse(jsonMatch[0]);
-    const lendingBps = parseInt(parsed.lending_bps);
-    const ammBps = parseInt(parsed.amm_bps);
-    allocations = [lendingBps, ammBps];
+      const jsonMatch = answer.match(/\{[\s\S]*?\}/);
+      if (!jsonMatch) {
+        throw new Error("Failed to parse JSON allocations from model response.");
+      }
+      const parsed = JSON.parse(jsonMatch[0]);
+      const lendingBps = parseInt(parsed.lending_bps);
+      const ammBps = parseInt(parsed.amm_bps);
+      allocations = [lendingBps, ammBps];
 
-    console.log(`[✔] Resolved allocations: Lending: ${lendingBps} bps, AMM: ${ammBps} bps`);
+      console.log(`[✔] Resolved allocations: Lending: ${lendingBps} bps, AMM: ${ammBps} bps`);
+    }
 
     console.log(`[*] Dispersing strategy payload to 0G DA...`);
     const preSignPayload = {

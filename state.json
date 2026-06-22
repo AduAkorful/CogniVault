@@ -3,13 +3,13 @@
         "lending": {
             "name": "Lending Pool",
             "address": "0x2969d1b707baF19D57949d68e9D8b8eD6cb257F8",
-            "apy": 550,
+            "apy": 781,
             "risk": 1.2
         },
         "amm": {
             "name": "AMM Pool",
             "address": "0x8eDf650c14A9fEc51FF8208B919F2E7e32827fF8",
-            "apy": 1200,
+            "apy": 1594,
             "risk": 3
         }
     },
@@ -204,11 +204,114 @@
             "da_quorum_id": 0,
             "signature": "3e581a84929d73aa61d284bc9af9dafb18b2ccc624bb1765972835b59d4b73d466c57d6d9c235fab7371abe318bb867c8c99835c62d27098272b55cfb92c71c71b",
             "message_hash": "d8a3a27d807fae1af092ed5abf105900d1cb4bfb16d3771dce22ef8db3df58e1"
+        },
+        {
+            "timestamp": 1782127272941,
+            "allocations": [
+                4000,
+                6000
+            ],
+            "targets": [
+                "0x2969d1b707baF19D57949d68e9D8b8eD6cb257F8",
+                "0x8eDf650c14A9fEc51FF8208B919F2E7e32827fF8"
+            ],
+            "da_blob_hash": "1c76c73277c0e5352ed19346b71b099d1b20e8328b5bd24ba2ab20e6e0c979d6",
+            "da_data_root": "f3b9cca966e0a19b26cf4cda191f0f789f04fdfceccc1e7a95658fa370b78ea8",
+            "da_epoch": 55,
+            "da_quorum_id": 0,
+            "signature": "f1d4daebb0ed8efbb1a621abfbfacb2b691e3020e90f74457da0190a7275f1132d6067f37c047949c6fb44c319365af25d57a500651c25db3a22d4fc04d6adbc1b",
+            "message_hash": "211ca79a527ba9ea906793052256ca8cc0d5ebf59225a03c3c171fcb70327239"
+        },
+        {
+            "timestamp": 1782127434390,
+            "allocations": [
+                4000,
+                6000
+            ],
+            "targets": [
+                "0x2969d1b707baF19D57949d68e9D8b8eD6cb257F8",
+                "0x8eDf650c14A9fEc51FF8208B919F2E7e32827fF8"
+            ],
+            "da_blob_hash": "1c76c73277c0e5352ed19346b71b099d1b20e8328b5bd24ba2ab20e6e0c979d6",
+            "da_data_root": "f3b9cca966e0a19b26cf4cda191f0f789f04fdfceccc1e7a95658fa370b78ea8",
+            "da_epoch": 55,
+            "da_quorum_id": 0,
+            "signature": "f1d4daebb0ed8efbb1a621abfbfacb2b691e3020e90f74457da0190a7275f1132d6067f37c047949c6fb44c319365af25d57a500651c25db3a22d4fc04d6adbc1b",
+            "message_hash": "211ca79a527ba9ea906793052256ca8cc0d5ebf59225a03c3c171fcb70327239"
         }
     ],
-    "latest_storage_root": "0x2636f92d2526757d59353f0c38a54ba80c4c35cc7560789cfd3be6e64244cb30",
-    "da_blob_hash": "0x0bb9a015e1c404468fd6580cbdd1f4284aa6662f0e891130cee8b5ea7ef5f453",
-    "da_data_root": "0x66bb6dc06402f99e676850d1be3b9a08ce45112157d181b0bb49593ae2601d29",
-    "da_epoch": 29696959,
-    "da_quorum_id": 0
+    "latest_storage_root": "0x8a5a0334a14516557f0727fd727c7e66beaea87895cdaf6782cdad9dd010ec57",
+    "da_blob_hash": "0x1c76c73277c0e5352ed19346b71b099d1b20e8328b5bd24ba2ab20e6e0c979d6",
+    "da_data_root": "0xf3b9cca966e0a19b26cf4cda191f0f789f04fdfceccc1e7a95658fa370b78ea8",
+    "da_epoch": 55,
+    "da_quorum_id": 0,
+    "da_demo_mode": true,
+    "aum_history": [
+        {
+            "block": 40126235,
+            "aum": 50,
+            "timestamp": 1782127410693
+        },
+        {
+            "block": 40126332,
+            "aum": 50.000011,
+            "timestamp": 1782127460766
+        }
+    ],
+    "logs": [
+        {
+            "type": "system",
+            "text": "Cycle #1 started. AUM: $50.00",
+            "time": "2026-06-22T11:23:30.694Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 1/4: 0G Storage — uploading pool metrics...",
+            "time": "2026-06-22T11:23:30.938Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 1/4: 0G Storage upload complete.",
+            "time": "2026-06-22T11:23:52.279Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 2/4: 0G Compute — dispatching TEE inference...",
+            "time": "2026-06-22T11:23:52.281Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 2/4: TEE inference complete. Strategy signed.",
+            "time": "2026-06-22T11:23:54.455Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 3/4: 0G DA — verifying blob dispersal. Allocations: [4000, 6000] bps",
+            "time": "2026-06-22T11:23:54.467Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 4/4: 0G Chain — submitting executeAIStrategy...",
+            "time": "2026-06-22T11:23:54.479Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "DA commitment registered on-chain (0x0e826679872066...)",
+            "time": "2026-06-22T11:24:07.766Z",
+            "cycle": 1
+        },
+        {
+            "type": "system",
+            "text": "Rebalance complete! Tx: 0x7b161655ab0c91... AUM: $50.00",
+            "time": "2026-06-22T11:24:21.009Z",
+            "cycle": 1
+        }
+    ]
 }
