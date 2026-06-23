@@ -3,13 +3,13 @@
         "lending": {
             "name": "Lending Pool",
             "address": "0x2969d1b707baF19D57949d68e9D8b8eD6cb257F8",
-            "apy": 906,
+            "apy": 868,
             "risk": 1.2
         },
         "amm": {
             "name": "AMM Pool",
             "address": "0x8eDf650c14A9fEc51FF8208B919F2E7e32827fF8",
-            "apy": 848,
+            "apy": 690,
             "risk": 3
         }
     },
@@ -255,9 +255,26 @@
             "da_quorum_id": 0,
             "signature": "09a03bf4ef96c8ab31e4db35d30321364048adb8973c8956644f094d551f05e608da3b096b1827226797b41232b0bd687bd94bf78bfa386e009dd478a2f1f6ef1b",
             "message_hash": "9c5ca2786c2892e7bdb9f84186764af0d02349fa1bae6aa1fb800412c5c1e802"
+        },
+        {
+            "timestamp": 1782241676912,
+            "allocations": [
+                6000,
+                4000
+            ],
+            "targets": [
+                "0x2969d1b707baF19D57949d68e9D8b8eD6cb257F8",
+                "0x8eDf650c14A9fEc51FF8208B919F2E7e32827fF8"
+            ],
+            "da_blob_hash": "ee03ce7863953e25e55c7d7c4d59204fdcd27f1c6e55fabe88aebc7b068eca06",
+            "da_data_root": "320f6a58c62e1d07ad934ea3dbb80ae6137da933635be7e12c7b1fa046c24a7c",
+            "da_epoch": 55,
+            "da_quorum_id": 0,
+            "signature": "09a03bf4ef96c8ab31e4db35d30321364048adb8973c8956644f094d551f05e608da3b096b1827226797b41232b0bd687bd94bf78bfa386e009dd478a2f1f6ef1b",
+            "message_hash": "9c5ca2786c2892e7bdb9f84186764af0d02349fa1bae6aa1fb800412c5c1e802"
         }
     ],
-    "latest_storage_root": "0x59392c2a22442bed1ad1e3d4cceed08f3d8ba61ddb4e574d83453ed66ea286e2",
+    "latest_storage_root": "0x8bfd4171eb675dabeb08679ebbc333544128f82535a96ad17ae288fc258f80c2",
     "da_blob_hash": "0xee03ce7863953e25e55c7d7c4d59204fdcd27f1c6e55fabe88aebc7b068eca06",
     "da_data_root": "0x320f6a58c62e1d07ad934ea3dbb80ae6137da933635be7e12c7b1fa046c24a7c",
     "da_epoch": 55,
@@ -283,6 +300,16 @@
             "block": 40339660,
             "aum": 470.131852,
             "timestamp": 1782234093510
+        },
+        {
+            "block": 40354792,
+            "aum": 470.225234,
+            "timestamp": 1782241656791
+        },
+        {
+            "block": 40354865,
+            "aum": 470.225474,
+            "timestamp": 1782241692344
         }
     ],
     "logs": [
@@ -386,6 +413,66 @@
             "type": "system",
             "text": "Rebalance complete! Tx: 0x4a7203b8ce1840... AUM: $470.13",
             "time": "2026-06-23T17:01:33.876Z",
+            "cycle": 1
+        },
+        {
+            "type": "system",
+            "text": "Cycle #1 started. AUM: $470.23",
+            "time": "2026-06-23T19:07:36.792Z",
+            "cycle": 1
+        },
+        {
+            "type": "system",
+            "text": "AI Sensed Pool Yields: Lending APY = 8.68%, AMM APY = 6.90%",
+            "time": "2026-06-23T19:07:37.192Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 1/4: 0G Storage — uploading pool metrics...",
+            "time": "2026-06-23T19:07:37.194Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 1/4: 0G Storage upload complete.",
+            "time": "2026-06-23T19:07:54.959Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 2/4: 0G Compute — dispatching TEE inference...",
+            "time": "2026-06-23T19:07:54.960Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "AI Decision: Allocate 60.00% to Lending, 40.00% to AMM (Risk limit: 2)",
+            "time": "2026-06-23T19:07:56.939Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 2/4: TEE inference complete. Strategy signed.",
+            "time": "2026-06-23T19:07:56.940Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 3/4: 0G DA — verifying blob dispersal. Allocations: [6000, 4000] bps",
+            "time": "2026-06-23T19:07:56.941Z",
+            "cycle": 1
+        },
+        {
+            "type": "info",
+            "text": "Stage 4/4: 0G Chain — submitting executeAIStrategy...",
+            "time": "2026-06-23T19:07:56.949Z",
+            "cycle": 1
+        },
+        {
+            "type": "system",
+            "text": "Rebalance complete! Tx: 0x0e6a3eb902ce75... AUM: $470.23",
+            "time": "2026-06-23T19:08:12.720Z",
             "cycle": 1
         }
     ]

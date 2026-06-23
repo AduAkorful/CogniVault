@@ -70,7 +70,6 @@ function appendLog(type, text) {
     const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
     if (!state.logs) state.logs = [];
     state.logs.push({ type, text, time: new Date().toISOString(), cycle: cycleCount });
-    if (state.logs.length > 100) state.logs = state.logs.slice(-100);
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 4), 'utf8');
   } catch { /* non-critical */ }
 }
@@ -170,7 +169,6 @@ async function recordAUM() {
 
   if (!state.aum_history) state.aum_history = [];
   state.aum_history.push({ block, aum, timestamp: Date.now() });
-  if (state.aum_history.length > 100) state.aum_history = state.aum_history.slice(-100);
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 4), 'utf8');
   console.log(`[*] Recorded AUM: $${aum.toFixed(2)} at block #${block}`);
 }
@@ -200,6 +198,15 @@ async function runCycle() {
     console.log("\n[*] Syncing pool APYs from on-chain (market sim may have changed them)...");
     await syncPoolAPYs();
 
+    try {
+      const preState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+      const preLendingAPY = (preState.pools.lending.apy / 100).toFixed(2);
+      const preAmmAPY = (preState.pools.amm.apy / 100).toFixed(2);
+      appendLog('system', `AI Sensed Pool Yields: Lending APY = ${preLendingAPY}%, AMM APY = ${preAmmAPY}%`);
+    } catch (err) {
+      console.warn(`[Warning] Could not append sensed pool APYs log: ${err.message}`);
+    }
+
     console.log("\n[STAGE 1/4] 📊 SENSE: Running Log Aggregator & 0G Storage Upload...");
     appendLog('info', `Stage 1/4: 0G Storage — uploading pool metrics...`);
     runCommandWithRetry("node log_aggregator.js", "Log Aggregator");
@@ -208,6 +215,18 @@ async function runCycle() {
     console.log("\n[STAGE 2/4] 🧠 THINK: Running Compute Client & 0G TEE Inference...");
     appendLog('info', `Stage 2/4: 0G Compute — dispatching TEE inference...`);
     runCommandWithRetry("node compute_client.js", "Compute Client");
+
+    try {
+      const postState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+      if (postState.history && postState.history.length > 0) {
+        const run = postState.history[postState.history.length - 1];
+        const lendBps = run.allocations[0];
+        const ammBps = run.allocations[1];
+        appendLog('info', `AI Decision: Allocate ${(lendBps/100).toFixed(2)}% to Lending, ${(ammBps/100).toFixed(2)}% to AMM (Risk limit: ${postState.max_risk_limit})`);
+      }
+    } catch (err) {
+      console.warn(`[Warning] Could not append AI decision log: ${err.message}`);
+    }
     appendLog('info', `Stage 2/4: TEE inference complete. Strategy signed.`);
 
     if (!fs.existsSync(STATE_FILE)) {

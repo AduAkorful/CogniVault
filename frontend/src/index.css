@@ -267,11 +267,40 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; letter-spacing
 .header-logo-sm {
   width: 34px;
   height: 34px;
-  background: linear-gradient(135deg, var(--c-primary), var(--c-secondary));
+  background: var(--bg-soft);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.header-logo-sm:hover {
+  transform: translateY(-1.5px);
+  border-color: rgba(0, 242, 254, 0.5);
+  box-shadow: 0 0 15px rgba(0, 242, 254, 0.25);
+}
+
+.glowing-logo {
+  display: block;
+}
+
+@keyframes logoCorePulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+}
+
+.logo-core {
+  transform-origin: center;
+  animation: logoCorePulse 2s infinite ease-in-out;
 }
 
 .header-name {
@@ -774,20 +803,78 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; letter-spacing
 }
 
 .term-line {
-  line-height: 1.5;
+  line-height: 1.6;
   word-break: break-all;
-  color: #a7f3d0;
+  color: var(--t-body);
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.15rem 0;
+  animation: logFadeIn 0.2s ease-out forwards;
 }
 
 .term-line .term-time {
   color: var(--t-muted);
-  margin-right: 0.5rem;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
+  margin-right: 0.3rem;
+  opacity: 0.7;
 }
 
-.term-info { color: #93c5fd; }
-.term-error { color: #fca5a5; }
-.term-system { color: #c084fc; }
+.term-line .term-text {
+  color: #f1f5f9;
+}
+
+.term-info .term-text { color: #e2e8f0; }
+.term-error .term-text { color: #fecaca; }
+.term-system .term-text { color: #f3e8ff; }
+
+/* Log Badges */
+.log-badge {
+  display: inline-block;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.58rem;
+  font-weight: 700;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-right: 0.25rem;
+  flex-shrink: 0;
+}
+
+.badge-system {
+  background: rgba(192, 132, 252, 0.15);
+  color: #d8b4fe;
+  border: 1px solid rgba(192, 132, 252, 0.3);
+}
+
+.badge-error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.badge-success {
+  background: rgba(16, 185, 129, 0.15);
+  color: #a7f3d0;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.badge-info {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+@keyframes logFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
 /* Pipeline */
 .pipeline {

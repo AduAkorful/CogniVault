@@ -14,6 +14,7 @@ import {
   POOL_ABI, GALILEO_CHAIN_ID, GALILEO_RPC
 } from './config/contracts';
 import { useVault } from './hooks/useVault';
+import { CogniVaultLogo } from './components/CogniVaultLogo';
 
 // Contract addresses are static — always load from the build-time bundle.
 const DEPLOYMENTS_URL = '/deployments.json';
@@ -282,6 +283,14 @@ function App() {
   };
 
   // Helpers
+  const getLogBadge = (type) => {
+    const t = type?.toLowerCase();
+    if (t === 'system') return <span className="log-badge badge-system">system</span>;
+    if (t === 'error') return <span className="log-badge badge-error">error</span>;
+    if (t === 'success') return <span className="log-badge badge-success">success</span>;
+    return <span className="log-badge badge-info">info</span>;
+  };
+
   const fmt = (n, d = 2) => (n != null && !isNaN(n)) ? n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : '0.00';
   const fmtAddr = (addr) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : 'N/A';
 
@@ -352,7 +361,7 @@ function App() {
       <header className="app-header">
         <div className="app-header-left">
           <div className="header-logo-sm">
-            <Lock size={18} style={{ color: '#080b11' }} />
+            <CogniVaultLogo />
           </div>
           <span className="header-name">CogniVault</span>
           <span className="header-net"><span className="net-dot" /> Galileo Live</span>
@@ -597,13 +606,15 @@ function App() {
                 {pipelineLogs.map((log, i) => (
                   <div key={`p${i}`} className={`term-line term-${log.type}`}>
                     <span className="term-time">{log.time ? new Date(log.time).toLocaleTimeString() : ''}</span>
-                    {log.text}
+                    {getLogBadge(log.type)}
+                    <span className="term-text">{log.text}</span>
                   </div>
                 ))}
                 {logs.map(log => (
                   <div key={log.id} className={`term-line term-${log.type}`}>
                     <span className="term-time">{log.time}</span>
-                    {log.text}
+                    {getLogBadge(log.type)}
+                    <span className="term-text">{log.text}</span>
                   </div>
                 ))}
               </div>
