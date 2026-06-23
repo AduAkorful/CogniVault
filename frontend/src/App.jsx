@@ -78,7 +78,7 @@ function App() {
 
   const addLog = useCallback((type, text) => {
     const id = ++logIdRef.current;
-    setLogs(prev => [...prev.slice(-80), { id, type, text, time: new Date().toLocaleTimeString() }]);
+    setLogs(prev => [...prev.slice(-80), { id, type, text, time: new Date().toISOString() }]);
   }, []);
 
   // Fetch deployments.json
@@ -355,6 +355,15 @@ function App() {
     );
   }
 
+  // Combine and sort logs chronologically (ascending)
+  const combinedLogs = [
+    ...pipelineLogs.map((log, i) => ({ ...log, id: `p-${i}` })),
+    ...logs.map(log => ({ ...log, id: `l-${log.id}` }))
+  ];
+  const sortedLogs = [...combinedLogs].sort((a, b) => {
+    return new Date(a.time).getTime() - new Date(b.time).getTime();
+  });
+
   return (
     <div className="app">
       {/* Header */}
@@ -504,7 +513,7 @@ function App() {
         )}
 
         {/* Allocation + Performance */}
-        <div className="grid-row grid-2-1">
+        <div className="grid-row grid-1-1">
           <div className="card">
             <div className="card-header">
               <h3><Activity size={18} /> Vault Allocation</h3>
@@ -602,17 +611,10 @@ function App() {
             </div>
             <div className="terminal">
               <div className="terminal-body" ref={terminalBodyRef} onScroll={handleScroll}>
-                {pipelineLogs.length === 0 && logs.length === 0 && <div className="term-line muted">Waiting for pipeline activity...</div>}
-                {pipelineLogs.map((log, i) => (
-                  <div key={`p${i}`} className={`term-line term-${log.type}`}>
-                    <span className="term-time">{log.time ? new Date(log.time).toLocaleTimeString() : ''}</span>
-                    {getLogBadge(log.type)}
-                    <span className="term-text">{log.text}</span>
-                  </div>
-                ))}
-                {logs.map(log => (
+                {sortedLogs.length === 0 && <div className="term-line muted">Waiting for pipeline activity...</div>}
+                {sortedLogs.map((log) => (
                   <div key={log.id} className={`term-line term-${log.type}`}>
-                    <span className="term-time">{log.time}</span>
+                    <span className="term-time">{log.time ? new Date(log.time).toLocaleTimeString() : ''}</span>
                     {getLogBadge(log.type)}
                     <span className="term-text">{log.text}</span>
                   </div>

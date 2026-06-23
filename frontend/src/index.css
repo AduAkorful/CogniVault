@@ -241,13 +241,13 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; letter-spacing
 
 /* ============ DASHBOARD ============ */
 .app {
-  max-width: 1240px;
+  max-width: 1520px;
   margin: 0 auto;
   padding: 1.5rem;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 .app-header {
@@ -370,13 +370,13 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; letter-spacing
 .app-body {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1rem;
 }
 
 /* Grid Rows */
 .grid-row {
   display: grid;
-  gap: 1.25rem;
+  gap: 1rem;
 }
 
 .grid-3 { grid-template-columns: 1.5fr 1fr 1fr; }
@@ -774,10 +774,10 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; letter-spacing
 
 /* Terminal & Pipeline */
 .card-terminal, .card-pipeline {
-  height: 480px;
+  height: 540px;
 }
 .card-pipeline {
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .terminal {
@@ -803,25 +803,30 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; letter-spacing
 }
 
 .term-line {
-  line-height: 1.6;
-  word-break: break-all;
+  line-height: 1.5;
   color: var(--t-body);
   display: flex;
-  align-items: center;
-  gap: 0.2rem;
-  padding: 0.15rem 0;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
   animation: logFadeIn 0.2s ease-out forwards;
 }
 
 .term-line .term-time {
   color: var(--t-muted);
-  font-size: 0.68rem;
-  margin-right: 0.3rem;
+  font-size: 0.72rem;
+  width: 85px;
+  flex-shrink: 0;
+  white-space: nowrap;
   opacity: 0.7;
 }
 
 .term-line .term-text {
   color: #f1f5f9;
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .term-info .term-text { color: #e2e8f0; }
@@ -831,13 +836,14 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; letter-spacing
 /* Log Badges */
 .log-badge {
   display: inline-block;
-  padding: 0.05rem 0.3rem;
-  font-size: 0.58rem;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.6rem;
   font-weight: 700;
   border-radius: 4px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  margin-right: 0.25rem;
+  width: 62px;
+  text-align: center;
   flex-shrink: 0;
 }
 
@@ -1015,3 +1021,24 @@ input[type="range"]:disabled::-webkit-slider-thumb { cursor: not-allowed; }
 }
 
 .market-tx .mono { color: var(--t-primary); }
+
+@media (max-width: 768px) {
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.85rem;
+    padding-bottom: 1rem;
+  }
+  .app-header-left {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .app-header-right {
+    width: 100%;
+  }
+  .app-header-right .header-wallet {
+    width: 100%;
+    justify-content: center;
+  }
+}
