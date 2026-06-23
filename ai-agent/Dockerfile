@@ -22,5 +22,4 @@ COPY deployments.json ./deployments.json
 EXPOSE 3100
 
 WORKDIR /app/ai-agent
-
-CMD node market_simulator.js & node relayer.js & node api_server.js
+CMD ["node", "runner.js"]

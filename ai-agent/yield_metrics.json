@@ -54,5 +54,12 @@
     "lending_apy": 781,
     "amm_apy": 1594,
     "risk_limit": 2
+  },
+  {
+    "timestamp": "2026-06-23T17:00:58.988Z",
+    "block": 40339600,
+    "lending_apy": 906,
+    "amm_apy": 848,
+    "risk_limit": 2
   }
 ]

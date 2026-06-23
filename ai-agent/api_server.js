@@ -4,14 +4,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 const STATE_FILE = path.join(__dirname, '..', 'state.json');
 const DEPLOYMENTS_FILE = path.join(__dirname, '..', 'deployments.json');
 
-const PORT = parseInt(process.env.API_PORT || '3100', 10);
+const PORT = parseInt(process.env.PORT || process.env.API_PORT || '3100', 10);
 // Strip trailing slash — browsers never send Origin with one, so an exact match is required.
 const CORS_ORIGIN = (process.env.CORS_ORIGIN || '*').replace(/\/$/, '');
 

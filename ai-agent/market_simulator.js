@@ -5,10 +5,10 @@ import { ethers } from 'ethers';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const DEPLOYMENTS_FILE = path.join(__dirname, '..', 'deployments.json');
 const BASE_INTERVAL_MS = parseInt(process.env.MARKET_SIM_INTERVAL_MS || '300000', 10); // 5 min base

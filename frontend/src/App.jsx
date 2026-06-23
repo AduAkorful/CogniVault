@@ -18,7 +18,7 @@ import { useVault } from './hooks/useVault';
 // Contract addresses are static — always load from the build-time bundle.
 const DEPLOYMENTS_URL = '/deployments.json';
 // Live pipeline telemetry comes from the Render API when configured.
-const PIPELINE_API = import.meta.env.VITE_PIPELINE_API_URL?.replace(/\/$/, '') || '';
+const PIPELINE_API = import.meta.env.VITE_PIPELINE_API_URL?.replace(/\/$/, '') || 'https://cognivault-ai-agent.onrender.com';
 const STATE_JSON_URL = PIPELINE_API ? `${PIPELINE_API}/state.json` : '/state.json';
 const SYNC_INTERVAL = 15000;
 
@@ -185,6 +185,24 @@ function App() {
   // Pipeline fetch
   const [pipelineLogs, setPipelineLogs] = useState([]);
   const [aumHistory, setAumHistory] = useState([]);
+  const [agentStatus, setAgentStatus] = useState('offline');
+
+  const checkAgentHealth = useCallback(async () => {
+    const HEALTH_URL = PIPELINE_API ? `${PIPELINE_API}/health` : '/health';
+    try {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(HEALTH_URL, { signal: controller.signal });
+      clearTimeout(id);
+      if (res.ok) {
+        setAgentStatus('online');
+      } else {
+        setAgentStatus('offline');
+      }
+    } catch {
+      setAgentStatus(prev => prev === 'online' ? 'offline' : 'waking');
+    }
+  }, []);
 
   const fetchPipelineState = useCallback(async () => {
     try {
@@ -206,20 +224,23 @@ function App() {
           time: h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : ''
         })));
       }
-
-      if (data.history?.length > 0) {
-        // Strategy history available in pipelineState for the pipeline panel
-      }
     } catch {
       // silent
     }
   }, []);
 
   useEffect(() => {
-    Promise.resolve().then(() => fetchPipelineState());
-    const interval = setInterval(fetchPipelineState, 15000);
-    return () => clearInterval(interval);
-  }, [fetchPipelineState]);
+    Promise.resolve().then(() => {
+      checkAgentHealth();
+      fetchPipelineState();
+    });
+    const intervalHealth = setInterval(checkAgentHealth, 840000); // Ping every 14 minutes to keep Render active
+    const intervalState = setInterval(fetchPipelineState, 15000);
+    return () => {
+      clearInterval(intervalHealth);
+      clearInterval(intervalState);
+    };
+  }, [checkAgentHealth, fetchPipelineState]);
 
   // Actions
   const handleDeposit = async () => {
@@ -317,6 +338,21 @@ function App() {
           </div>
           <span className="header-name">CogniVault</span>
           <span className="header-net"><span className="net-dot" /> Galileo Live</span>
+          {agentStatus === 'online' && (
+            <span className="header-net" style={{ color: 'var(--c-success)', border: '1px solid rgba(16, 185, 129, 0.15)', background: 'rgba(16, 185, 129, 0.08)', padding: '0.2rem 0.6rem', borderRadius: '12px', marginLeft: '0.5rem' }}>
+              <span className="net-dot" style={{ background: 'var(--c-success)' }} /> AI Agent Online
+            </span>
+          )}
+          {agentStatus === 'waking' && (
+            <span className="header-net" style={{ color: 'var(--c-warn)', border: '1px solid rgba(245, 158, 11, 0.15)', background: 'rgba(245, 158, 11, 0.08)', padding: '0.2rem 0.6rem', borderRadius: '12px', marginLeft: '0.5rem' }}>
+              <span className="net-dot" style={{ background: 'var(--c-warn)', animation: 'pulseDot 1s infinite' }} /> Waking AI Agent...
+            </span>
+          )}
+          {agentStatus === 'offline' && (
+            <span className="header-net" style={{ color: 'var(--c-error)', border: '1px solid rgba(239, 68, 68, 0.15)', background: 'rgba(239, 68, 68, 0.08)', padding: '0.2rem 0.6rem', borderRadius: '12px', marginLeft: '0.5rem' }}>
+              <span className="net-dot" style={{ background: 'var(--c-error)', animation: 'none' }} /> AI Agent Offline
+            </span>
+          )}
         </div>
         <div className="app-header-right">
           {isConnected ? (
