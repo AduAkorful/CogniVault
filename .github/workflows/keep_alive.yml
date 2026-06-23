@@ -3,6 +3,7 @@ name: Keep Backend Awake
 on:
   schedule:
     - cron: '*/14 * * * *' # Run every 14 minutes
+  workflow_dispatch: # Allows manual trigger from the GitHub Actions UI
 
 jobs:
   ping:
