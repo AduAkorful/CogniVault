@@ -187,6 +187,24 @@ function App() {
   const [aumHistory, setAumHistory] = useState([]);
   const [agentStatus, setAgentStatus] = useState('offline');
 
+  const terminalBodyRef = useRef(null);
+  const shouldAutoScrollRef = useRef(true);
+
+  const handleScroll = () => {
+    const container = terminalBodyRef.current;
+    if (!container) return;
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 15;
+    shouldAutoScrollRef.current = isAtBottom;
+  };
+
+  useEffect(() => {
+    const container = terminalBodyRef.current;
+    if (!container) return;
+    if (shouldAutoScrollRef.current) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [pipelineLogs, logs]);
+
   const checkAgentHealth = useCallback(async () => {
     const HEALTH_URL = PIPELINE_API ? `${PIPELINE_API}/health` : '/health';
     try {
@@ -574,7 +592,7 @@ function App() {
               <span className="badge-live"><span className="live-dot" /> Live</span>
             </div>
             <div className="terminal">
-              <div className="terminal-body">
+              <div className="terminal-body" ref={terminalBodyRef} onScroll={handleScroll}>
                 {pipelineLogs.length === 0 && logs.length === 0 && <div className="term-line muted">Waiting for pipeline activity...</div>}
                 {pipelineLogs.map((log, i) => (
                   <div key={`p${i}`} className={`term-line term-${log.type}`}>
@@ -592,7 +610,7 @@ function App() {
             </div>
           </div>
 
-          <div className="card">
+          <div className="card card-pipeline">
             <div className="card-header">
               <h3><Zap size={18} /> 0G Pipeline</h3>
               <button className="btn-sm" onClick={fetchPipelineState}>

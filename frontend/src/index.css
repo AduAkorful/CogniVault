@@ -743,8 +743,13 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; letter-spacing
 .chart-empty svg { opacity: 0.4; }
 .chart-empty p { font-size: 0.85rem; }
 
-/* Terminal */
-.card-terminal { min-height: 280px; }
+/* Terminal & Pipeline */
+.card-terminal, .card-pipeline {
+  height: 480px;
+}
+.card-pipeline {
+  overflow-y: auto;
+}
 
 .terminal {
   display: flex;
