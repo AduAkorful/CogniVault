@@ -221,6 +221,7 @@ Provide output as raw JSON containing "lending_bps" and "amm_bps".`;
       message_hash: messageHash.replace('0x', '')
     };
     state.history.push(runRecord);
+    if (state.history.length > 100) state.history = state.history.slice(-100);
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 4), 'utf8');
     updateStateWithDA(daResult);
     console.log("[✔] Updated state.json with live strategy execution run.");

@@ -747,6 +747,8 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; letter-spacing
 .card-terminal { min-height: 280px; }
 
 .terminal {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -758,7 +760,7 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; letter-spacing
 .terminal-body {
   padding: 0.85rem;
   overflow-y: auto;
-  max-height: 260px;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;

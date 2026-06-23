@@ -58,6 +58,7 @@ async function main() {
     risk_limit: riskLimit
   };
   db.push(newEntry);
+  if (db.length > 50) db = db.slice(-50);
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf8');
   console.log(`[✔] Logged new metrics to local DB:`);
   console.log(`    Block: #${newEntry.block} | Lending APY: ${(newEntry.lending_apy/100).toFixed(2)}% | AMM APY: ${(newEntry.amm_apy/100).toFixed(2)}%`);
