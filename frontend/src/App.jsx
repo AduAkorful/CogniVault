@@ -47,7 +47,7 @@ const CustomTooltip = ({ active, payload }) => {
         <div style={{ height: '1px', background: 'rgba(255,255,255,0.06)', margin: '0.2rem 0' }} />
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '2rem' }}>
           <span style={{ color: '#94a3b8' }}>AUM:</span>
-          <span style={{ fontWeight: '600', color: '#00f2fe' }}>${(data.realAum ?? data.aum).toFixed(4)}</span>
+          <span style={{ fontWeight: '600', color: '#00f2fe' }}>${data.aum.toFixed(4)}</span>
         </div>
         {data.timestamp && (
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '2rem', fontSize: '0.75rem', color: '#64748b' }}>
