@@ -49,7 +49,10 @@ if (!VAULT_ADDRESS) {
 const VAULT_ABI = [
   "function executeAIStrategy(uint256[] allocations, address[] targets, bytes signature, bytes32 daBlobHash, bytes32 dataRoot, uint256 daEpoch, uint256 daQuorumId) external",
   "function totalAssets() view returns (uint256)",
-  "function daVerificationEnabled() view returns (bool)"
+  "function daVerificationEnabled() view returns (bool)",
+  "event Rebalanced(address[] targets, uint256[] allocations, bytes32 indexed daBlobHash)",
+  "event Deposit(address indexed sender, address indexed owner, uint256 assets, uint256 shares)",
+  "event Withdraw(address indexed sender, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)"
 ];
 
 const DA_VERIFIER_ABI = [
@@ -171,6 +174,72 @@ async function recordAUM() {
   state.aum_history.push({ block, aum, timestamp: Date.now() });
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 4), 'utf8');
   console.log(`[*] Recorded AUM: $${aum.toFixed(2)} at block #${block}`);
+}
+
+async function backfillAumHistory() {
+  if (!fs.existsSync(STATE_FILE)) return;
+  const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+  
+  console.log("[*] Starting AUM history backfill from on-chain events...");
+  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const vault = new ethers.Contract(VAULT_ADDRESS, VAULT_ABI, provider);
+  
+  const startBlock = state.boot_block || 40000000;
+  const currentBlock = await provider.getBlockNumber();
+  
+  console.log(`[*] Querying events from block ${startBlock} to ${currentBlock}...`);
+  
+  try {
+    const depFilter = vault.filters.Deposit();
+    const witFilter = vault.filters.Withdraw();
+    const rebFilter = vault.filters.Rebalanced();
+    
+    const [depEvents, witEvents, rebEvents] = await Promise.all([
+      vault.queryFilter(depFilter, startBlock, currentBlock),
+      vault.queryFilter(witFilter, startBlock, currentBlock),
+      vault.queryFilter(rebFilter, startBlock, currentBlock)
+    ]);
+    
+    const allEvents = [...depEvents, ...witEvents, ...rebEvents];
+    const uniqueBlocks = Array.from(new Set(allEvents.map(e => e.blockNumber))).sort((a, b) => a - b);
+    
+    console.log(`[✔] Found ${allEvents.length} events across ${uniqueBlocks.length} unique blocks.`);
+    
+    if (!state.aum_history) state.aum_history = [];
+    const existingBlocks = new Set(state.aum_history.map(h => h.block));
+    const blocksToFetch = uniqueBlocks.filter(b => !existingBlocks.has(b));
+    
+    let updated = false;
+    for (const blockNum of blocksToFetch) {
+      console.log(`[*] Backfilling AUM for block #${blockNum}...`);
+      try {
+        const totalAssets = await vault.totalAssets({ blockTag: blockNum });
+        const aum = Number(ethers.formatUnits(totalAssets, 6));
+        const block = await provider.getBlock(blockNum);
+        const timestamp = block ? block.timestamp * 1000 : Date.now();
+        
+        state.aum_history.push({
+          block: blockNum,
+          aum,
+          timestamp
+        });
+        updated = true;
+        console.log(`    - Block #${blockNum}: AUM = $${aum.toFixed(4)}, Time = ${new Date(timestamp).toISOString()}`);
+      } catch (err) {
+        console.error(`[Warning] Failed to fetch historical state at block #${blockNum}:`, err.message);
+      }
+    }
+    
+    if (updated) {
+      state.aum_history.sort((a, b) => a.block - b.block);
+      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 4), 'utf8');
+      console.log("[✔] AUM history backfill completed and saved.");
+    } else {
+      console.log("[✔] AUM history is already up-to-date with on-chain events.");
+    }
+  } catch (error) {
+    console.error("[❌] Error backfilling AUM history:", error.message);
+  }
 }
 
 async function runCycle() {
@@ -325,6 +394,7 @@ async function main() {
   });
 
   await ensureStateFile();
+  await backfillAumHistory();
 
   while (keepRunning) {
     await runCycle();
