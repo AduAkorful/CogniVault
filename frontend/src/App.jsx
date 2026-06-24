@@ -408,7 +408,7 @@ function App() {
         <section className="metrics-row">
           <div className="metric-item">
             <span className="metric-label">Vault AUM</span>
-            <span className="metric-value cyan">${fmt(vaultAUM, 0)}</span>
+            <span className="metric-value cyan">${fmt(vaultAUM, 2)}</span>
           </div>
           <div className="metric-item">
             <span className="metric-label">Net APY</span>
@@ -537,7 +537,7 @@ function App() {
                 </svg>
                 <div className="donut-center">
                   <span className="donut-center-label">AUM</span>
-                  <span className="donut-center-val">${fmt(vaultAUM, 0)}</span>
+                  <span className="donut-center-val">${fmt(vaultAUM, 2)}</span>
                 </div>
               </div>
               <div className="alloc-pools">
@@ -552,7 +552,7 @@ function App() {
                     </div>
                     <div className="pool-row-right">
                       <div className="pool-apy">{(pool.apy / 100).toFixed(2)}%</div>
-                      <div className="pool-bal muted">${fmt(pool.balance, 0)}</div>
+                      <div className="pool-bal muted">${fmt(pool.balance, 2)}</div>
                       <div className="pool-yield">+${fmt(pool.pendingYield, 4)}</div>
                     </div>
                   </div>
@@ -590,9 +590,9 @@ function App() {
                 <p>Vault growth chart will appear after first deposit</p>
               </div>
             )}
-            {aumHistory.length > 1 && (() => {
+            {aumHistory.length > 0 && (() => {
               const bootAum = aumHistory[0]?.aum || 0;
-              const currentAum = aumHistory[aumHistory.length - 1]?.aum || 0;
+              const currentAum = vaultAUM;
               const diff = currentAum - bootAum;
               const pct = bootAum > 0 ? (diff / bootAum) * 100 : 0;
               
@@ -610,13 +610,22 @@ function App() {
                 diffStr = ` (${prefix}${formattedDiff})`;
               }
 
+              const useHighPrecision = Math.abs(diff) < 0.05;
+              const bootAumStr = useHighPrecision ? bootAum.toFixed(4) : fmt(bootAum, 2);
+              const currentAumStr = useHighPrecision ? currentAum.toFixed(4) : fmt(currentAum, 2);
+
               return (
-                <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', color: 'var(--t-secondary)' }}>
-                  <span>Boot: ${fmt(bootAum, 2)}</span>
-                  <span>Current: ${fmt(currentAum, 2)}</span>
-                  <span style={{ color: diff >= 0 ? 'var(--c-success)' : 'var(--c-danger)' }}>
-                    Growth: {pctStr}{diffStr}
-                  </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem', width: '100%' }}>
+                  <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', color: 'var(--t-secondary)' }}>
+                    <span>Boot AUM: ${bootAumStr}</span>
+                    <span>Current AUM: ${currentAumStr}</span>
+                    <span style={{ color: diff >= 0 ? 'var(--c-success)' : 'var(--c-danger)', fontWeight: 'bold' }}>
+                      Growth: {pctStr}{diffStr}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--t-muted)', borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: '0.4rem' }}>
+                    * Current AUM includes live pending yield of +${fmt(poolDetails.reduce((s, p) => s + p.pendingYield, 0), 4)} accruing this cycle. Yield is harvested and compounded on rebalance.
+                  </div>
                 </div>
               );
             })()}
