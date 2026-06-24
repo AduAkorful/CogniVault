@@ -1,4 +1,3 @@
-import React from 'react';
 
 // Custom premium animated logo representing decentralized AI governance + secure vaults
 export const CogniVaultLogo = () => (

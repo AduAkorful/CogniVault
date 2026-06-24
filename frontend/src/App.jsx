@@ -4,7 +4,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import {
-  Wallet, Lock, TrendingUp, Database, Cpu, Shield, ArrowRightLeft,
+  Wallet, TrendingUp, Database, Cpu, Shield, ArrowRightLeft,
   RefreshCw, Coins, Activity, Zap, CheckCircle2, ArrowDownRight, Loader2
 } from 'lucide-react';
 import {
@@ -590,15 +590,36 @@ function App() {
                 <p>Vault growth chart will appear after first deposit</p>
               </div>
             )}
-            {aumHistory.length > 1 && (
-              <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', color: 'var(--t-secondary)' }}>
-                <span>Boot: ${fmt(aumHistory[0]?.aum, 2)}</span>
-                <span>Current: ${fmt(aumHistory[aumHistory.length - 1]?.aum, 2)}</span>
-                <span style={{ color: 'var(--c-success)' }}>
-                  Growth: +{fmt(((aumHistory[aumHistory.length - 1]?.aum - aumHistory[0]?.aum) / Math.max(aumHistory[0]?.aum, 1)) * 100, 2)}%
-                </span>
-              </div>
-            )}
+            {aumHistory.length > 1 && (() => {
+              const bootAum = aumHistory[0]?.aum || 0;
+              const currentAum = aumHistory[aumHistory.length - 1]?.aum || 0;
+              const diff = currentAum - bootAum;
+              const pct = bootAum > 0 ? (diff / bootAum) * 100 : 0;
+              
+              let pctStr = '0.00%';
+              if (pct > 0) {
+                pctStr = pct < 0.01 ? `+${pct.toFixed(4)}%` : `+${pct.toFixed(2)}%`;
+              } else if (pct < 0) {
+                pctStr = pct > -0.01 ? `${pct.toFixed(4)}%` : `${pct.toFixed(2)}%`;
+              }
+              
+              let diffStr = '';
+              if (Math.abs(diff) > 0) {
+                const prefix = diff > 0 ? '+$' : '-$';
+                const formattedDiff = Math.abs(diff) < 0.01 ? Math.abs(diff).toFixed(4) : fmt(Math.abs(diff), 2);
+                diffStr = ` (${prefix}${formattedDiff})`;
+              }
+
+              return (
+                <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', color: 'var(--t-secondary)' }}>
+                  <span>Boot: ${fmt(bootAum, 2)}</span>
+                  <span>Current: ${fmt(currentAum, 2)}</span>
+                  <span style={{ color: diff >= 0 ? 'var(--c-success)' : 'var(--c-danger)' }}>
+                    Growth: {pctStr}{diffStr}
+                  </span>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
