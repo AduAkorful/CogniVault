@@ -578,7 +578,13 @@ function App() {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                     <XAxis dataKey="label" stroke="#64748b" fontSize={11} tickLine={false} />
-                    <YAxis stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={v => `$${v}`} />
+                    <YAxis 
+                      stroke="#64748b" 
+                      fontSize={11} 
+                      tickLine={false} 
+                      domain={['dataMin - 0.05', 'dataMax + 0.05']}
+                      tickFormatter={v => `$${Number(v).toFixed(2)}`} 
+                    />
                     <Tooltip contentStyle={{ background: '#0d121f', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', fontSize: '0.8rem' }} labelStyle={{ color: '#94a3b8' }} formatter={v => [`$${Number(v).toFixed(2)}`, 'AUM']} />
                     <Area type="monotone" dataKey="aum" name="Vault AUM" stroke="#00f2fe" strokeWidth={2} fill="url(#gradAUM)" />
                   </AreaChart>
